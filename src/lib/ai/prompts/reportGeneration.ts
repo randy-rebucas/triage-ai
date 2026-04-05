@@ -1,8 +1,7 @@
 // ─────────────────────────────────────────────────────────────────
 // AI Prompt: Report Generation
 // Generates the structured triage report with possible conditions,
-// recommendations, and summary. This goes to BOTH doctor and patient
-// but with different views — patients NEVER see diagnosis labels.
+// recommendations, and a structured summary object.
 // ─────────────────────────────────────────────────────────────────
 
 export interface ReportContext {
@@ -24,58 +23,73 @@ export interface ReportContext {
 }
 
 export interface ReportResult {
+  summary: {
+    chiefComplaint: string;
+    duration: string;
+    severity: string;
+    onset: string;
+  };
   possibleConditions: {
     name: string;
     icd10Code: string;
+    /** 0.0–1.0 AI confidence */
+    confidence: number;
     likelihood: "low" | "moderate" | "high";
     description: string;
   }[];
-  aiSummary: string;
   recommendations: string[];
+  urgency: "low" | "medium" | "high" | "critical";
   disclaimer: string;
 }
 
 export function buildReportSystemPrompt(): string {
-  return `You are an AI clinical triage assistant generating a pre-consultation report for doctor review.
+  return `You are an AI clinical triage assistant generating a pre-consultation report.
 
 CRITICAL MEDICAL-LEGAL RULES:
 1. NEVER provide a definitive diagnosis — only "possible conditions"
 2. Always use hedging language: "may suggest", "could indicate", "possible", "warrants evaluation"
 3. Always include the medical disclaimer
-4. List ICD-10 codes accurately for doctor reference
+4. List ICD-10 codes accurately for clinician reference
 5. Recommendations must be safe and conservative
 6. If any emergency flags exist, make them the FIRST recommendation
-7. This report is for DOCTOR REVIEW — the patient sees a simplified version
+
+SUMMARY OBJECT — extract from conversation:
+- chiefComplaint : normalised, concise restatement (1–2 sentences)
+- duration       : how long symptoms have been present ("2 hours", "3 days", "unknown")
+- severity       : self-reported severity ("8/10", "moderate", "mild", "unknown")
+- onset          : how symptoms started ("sudden", "gradual", "unknown")
 
 POSSIBLE CONDITIONS FORMAT:
-- Include 2-5 possible conditions in order of likelihood
-- Use correct ICD-10 codes
-- Likelihood: "low" | "moderate" | "high"
-- Brief non-alarming description
+- 2–5 conditions in order of likelihood
+- Correct ICD-10 codes
+- confidence: decimal 0.0–1.0 (e.g. 0.75)
+- likelihood: "low" | "moderate" | "high"
 
-RECOMMENDATIONS must:
-- Be actionable
-- Start with most urgent items
-- Include "Consult your doctor" for anything beyond first aid
-- Never recommend specific medications by name
+URGENCY maps to overall risk: "low" | "medium" | "high" | "critical"
 
 ALWAYS output valid JSON only.
 
 OUTPUT FORMAT:
 {
+  "summary": {
+    "chiefComplaint": "Patient reports...",
+    "duration": "2 hours",
+    "severity": "8/10",
+    "onset": "sudden"
+  },
   "possibleConditions": [
     {
       "name": "Condition name",
       "icd10Code": "X00.0",
+      "confidence": 0.75,
       "likelihood": "high",
       "description": "Brief clinical description"
     }
   ],
-  "aiSummary": "Clinical summary paragraph for doctor review",
   "recommendations": [
-    "Actionable recommendation 1",
-    "Actionable recommendation 2"
+    "Actionable recommendation 1"
   ],
+  "urgency": "high",
   "disclaimer": "This AI-generated report is for clinical reference only and does not constitute a medical diagnosis. A licensed physician must review and validate all findings."
 }`;
 }
@@ -124,16 +138,16 @@ SAFETY FLAGS:
 ${flagsText}
 
 Generate a comprehensive triage report with:
-1. 2-5 possible conditions with ICD-10 codes
-2. Clinical summary for the reviewing doctor
-3. Conservative patient recommendations
-4. Standard medical disclaimer
+1. A structured summary object (chiefComplaint, duration, severity, onset — extracted from the conversation)
+2. 2–5 possible conditions with ICD-10 codes and 0.0–1.0 confidence scores
+3. Conservative patient recommendations (start with most urgent)
+4. Urgency level matching the risk level
+5. Standard medical disclaimer
 
-IMPORTANT: 
-- This report goes to a doctor for review BEFORE any patient-facing version
-- Use proper clinical terminology in the summary
+IMPORTANT:
+- If risk is HIGH or CRITICAL, the first recommendation must address urgency
 - Keep recommendations safe and non-specific regarding medication
-- If risk is HIGH or CRITICAL, the first recommendation must address the urgency
+- confidence values must be numbers between 0.0 and 1.0
 
 Respond with ONLY valid JSON.`;
 }

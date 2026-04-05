@@ -3,46 +3,90 @@ import type { RiskLevel, TriageStatus } from "@/types";
 
 // ─────────────────────────────────────────────────────────────────
 // TriageSession Model
+//
 // Records the full AI triage conversation, risk assessment, and
-// doctor validation for a single patient visit.
+// structured AI report for a single patient symptom check.
+//
+// Schema shape matches the agreed MongoDB-friendly format:
+//   - qaFlow      : the sequential Q&A exchange
+//   - aiReport    : structured AI output (summary, conditions, recs)
+//   - clinicalReview : optional clinician notes after validation
 // ─────────────────────────────────────────────────────────────────
+
+export interface IAiSummary {
+  /** Normalised restatement of the chief complaint */
+  chiefComplaint: string;
+  /** Self-reported symptom duration, e.g. "2 hours", "3 days" */
+  duration?: string;
+  /** Self-reported severity, e.g. "8/10", "moderate" */
+  severity?: string;
+  /** Onset pattern, e.g. "sudden", "gradual" */
+  onset?: string;
+}
+
+export interface IAiCondition {
+  name: string;
+  icd10Code: string;
+  /** 0.0–1.0 AI confidence for this condition */
+  confidence: number;
+  /** Categorical likelihood for display */
+  likelihood: "low" | "moderate" | "high";
+  description: string;
+}
+
+export interface IAiReport {
+  summary: IAiSummary;
+  possibleConditions: IAiCondition[];
+  recommendations: string[];
+  /** Matches riskLevel — kept inside aiReport for the self-contained report view */
+  urgency: RiskLevel;
+  disclaimer: string;
+}
+
+export interface IClinicalReview {
+  reviewedBy: string;
+  reviewedAt: Date;
+  notes?: string;
+  agreedWithAI: boolean;
+}
 
 export interface ITriageSessionDocument extends Document {
   tenantId: Types.ObjectId;
   patientId: Types.ObjectId;
+
+  /** What the patient reported as the main concern */
   chiefComplaint: string;
-  questions: {
+
+  /** Sequential Q&A pairs — renamed from `questions` */
+  qaFlow: {
     questionId: string;
     question: string;
     answer: string;
     answeredAt: Date;
   }[];
+
   currentQuestionIndex: number;
   totalQuestions: number;
-  riskScore: number;
-  riskLevel: RiskLevel;
-  possibleConditions: {
-    name: string;
-    icd10Code: string;
-    likelihood: "low" | "moderate" | "high";
-    description: string;
-  }[];
-  aiSummary: string;
-  recommendations: string[];
+
+  /** Keyword-detected safety flags raised during questioning */
   safetyFlags: {
     flag: string;
     severity: "warning" | "urgent" | "emergency";
   }[];
+
+  /** Raw AI risk score (0–100) for sorting / filtering */
+  riskScore: number;
+  /** Categorical risk level */
+  riskLevel: RiskLevel;
+
+  /** Structured AI report — generated once Q&A is complete */
+  aiReport?: IAiReport;
+
   status: TriageStatus;
-  doctorValidation?: {
-    doctorId: Types.ObjectId;
-    doctorName: string;
-    validatedAt: Date;
-    finalDiagnosis: string;
-    icd10Code: string;
-    notes: string;
-    agreedWithAI: boolean;
-  };
+
+  /** Populated when a clinician validates the session */
+  clinicalReview?: IClinicalReview;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,7 +100,7 @@ const triageSessionSchema = new Schema<ITriageSessionDocument>(
     },
     patientId: {
       type: Schema.Types.ObjectId,
-      ref: "Patient",
+      ref: "PatientAccount",
       required: true,
     },
     chiefComplaint: {
@@ -65,7 +109,7 @@ const triageSessionSchema = new Schema<ITriageSessionDocument>(
       trim: true,
       maxlength: [1000, "Chief complaint cannot exceed 1000 characters"],
     },
-    questions: [
+    qaFlow: [
       {
         questionId: { type: String, required: true },
         question: { type: String, required: true },
@@ -73,14 +117,17 @@ const triageSessionSchema = new Schema<ITriageSessionDocument>(
         answeredAt: { type: Date, default: Date.now },
       },
     ],
-    currentQuestionIndex: {
-      type: Number,
-      default: 0,
-    },
-    totalQuestions: {
-      type: Number,
-      default: 0,
-    },
+    currentQuestionIndex: { type: Number, default: 0 },
+    totalQuestions: { type: Number, default: 0 },
+    safetyFlags: [
+      {
+        flag: { type: String },
+        severity: {
+          type: String,
+          enum: ["warning", "urgent", "emergency"],
+        },
+      },
+    ],
     riskScore: {
       type: Number,
       min: 0,
@@ -92,45 +139,40 @@ const triageSessionSchema = new Schema<ITriageSessionDocument>(
       enum: ["low", "medium", "high", "critical"],
       default: "low",
     },
-    possibleConditions: [
-      {
-        name: { type: String },
-        icd10Code: { type: String },
-        likelihood: {
-          type: String,
-          enum: ["low", "moderate", "high"],
-        },
-        description: { type: String },
+    aiReport: {
+      summary: {
+        chiefComplaint: { type: String },
+        duration: { type: String },
+        severity: { type: String },
+        onset: { type: String },
       },
-    ],
-    aiSummary: {
-      type: String,
-      default: "",
-    },
-    recommendations: {
-      type: [String],
-      default: [],
-    },
-    safetyFlags: [
-      {
-        flag: { type: String },
-        severity: {
-          type: String,
-          enum: ["warning", "urgent", "emergency"],
+      possibleConditions: [
+        {
+          name: { type: String },
+          icd10Code: { type: String },
+          confidence: { type: Number, min: 0, max: 1 },
+          likelihood: {
+            type: String,
+            enum: ["low", "moderate", "high"],
+          },
+          description: { type: String },
         },
+      ],
+      recommendations: { type: [String], default: [] },
+      urgency: {
+        type: String,
+        enum: ["low", "medium", "high", "critical"],
       },
-    ],
+      disclaimer: { type: String },
+    },
     status: {
       type: String,
-      enum: ["in-progress", "completed", "validated", "archived"],
+      enum: ["in-progress", "pending_review", "reviewed", "archived"],
       default: "in-progress",
     },
-    doctorValidation: {
-      doctorId: { type: Schema.Types.ObjectId, ref: "User" },
-      doctorName: { type: String },
-      validatedAt: { type: Date },
-      finalDiagnosis: { type: String },
-      icd10Code: { type: String },
+    clinicalReview: {
+      reviewedBy: { type: String },
+      reviewedAt: { type: Date },
       notes: { type: String },
       agreedWithAI: { type: Boolean },
     },
@@ -144,7 +186,6 @@ const triageSessionSchema = new Schema<ITriageSessionDocument>(
 triageSessionSchema.index({ tenantId: 1, status: 1, riskLevel: 1 });
 triageSessionSchema.index({ tenantId: 1, patientId: 1, status: 1 });
 triageSessionSchema.index({ createdAt: -1 });
-triageSessionSchema.index({ "doctorValidation.doctorId": 1 });
 
 const TriageSession =
   mongoose.models.TriageSession ||

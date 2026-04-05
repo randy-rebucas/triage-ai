@@ -10,8 +10,8 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export type TriageStatus =
   | "in-progress"
-  | "completed"
-  | "validated"
+  | "pending_review"
+  | "reviewed"
   | "archived";
 
 export type RecordStatus = "draft" | "final";
@@ -165,18 +165,35 @@ export interface IPatientWithUser extends IPatient {
 
 // ─── Triage Session ───────────────────────────────────────────────
 
-export interface ITriageQuestion {
+export interface IQaEntry {
   questionId: string;
   question: string;
   answer: string;
   answeredAt: Date;
 }
 
-export interface IPossibleCondition {
+export interface IAiCondition {
   name: string;
   icd10Code: string;
+  /** 0.0–1.0 AI confidence */
+  confidence: number;
   likelihood: "low" | "moderate" | "high";
   description: string;
+}
+
+export interface IAiSummary {
+  chiefComplaint: string;
+  duration?: string;
+  severity?: string;
+  onset?: string;
+}
+
+export interface IAiReport {
+  summary: IAiSummary;
+  possibleConditions: IAiCondition[];
+  recommendations: string[];
+  urgency: RiskLevel;
+  disclaimer: string;
 }
 
 export interface ISafetyFlag {
@@ -184,13 +201,10 @@ export interface ISafetyFlag {
   severity: "warning" | "urgent" | "emergency";
 }
 
-export interface IDoctorValidation {
-  doctorId: string;
-  doctorName: string;
-  validatedAt: Date;
-  finalDiagnosis: string;
-  icd10Code: string;
-  notes: string;
+export interface IClinicalReview {
+  reviewedBy: string;
+  reviewedAt: Date;
+  notes?: string;
   agreedWithAI: boolean;
 }
 
@@ -199,17 +213,15 @@ export interface ITriageSession {
   tenantId: string;
   patientId: string;
   chiefComplaint: string;
-  questions: ITriageQuestion[];
+  qaFlow: IQaEntry[];
   currentQuestionIndex: number;
   totalQuestions: number;
+  safetyFlags: ISafetyFlag[];
   riskScore: number;
   riskLevel: RiskLevel;
-  possibleConditions: IPossibleCondition[];
-  aiSummary: string;
-  recommendations: string[];
-  safetyFlags: ISafetyFlag[];
+  aiReport?: IAiReport;
   status: TriageStatus;
-  doctorValidation?: IDoctorValidation;
+  clinicalReview?: IClinicalReview;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -239,11 +251,8 @@ export interface IAIRiskAssessment {
 }
 
 export interface IAIReportResponse {
-  possibleConditions: IPossibleCondition[];
-  aiSummary: string;
-  recommendations: string[];
+  aiReport: IAiReport;
   riskAssessment: IAIRiskAssessment;
-  disclaimer: string;
 }
 
 // ─── Clinical Records ─────────────────────────────────────────────

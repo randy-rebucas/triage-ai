@@ -51,7 +51,7 @@ export default async function PatientDashboardPage({ params }: Props) {
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Total Assessments" value={total} />
         <StatCard label="High Risk" value={(riskCounts["critical"] ?? 0) + (riskCounts["high"] ?? 0)} highlight />
-        <StatCard label="Reviewed" value={sessions.filter((s) => s.status === "validated").length} />
+        <StatCard label="Reviewed" value={sessions.filter((s) => s.status === "reviewed").length} />
       </div>
 
       {/* Recent sessions */}
@@ -90,8 +90,8 @@ export default async function PatientDashboardPage({ params }: Props) {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <RiskBadge level={session.riskLevel} />
-                      <Badge variant={session.status === "validated" ? "success" : session.status === "completed" ? "info" : "default"}>
-                        {session.status === "validated" ? "Reviewed" : session.status === "completed" ? "Pending" : "Draft"}
+                      <Badge variant={session.status === "reviewed" ? "success" : session.status === "pending_review" ? "info" : "default"}>
+                        {session.status === "reviewed" ? "Reviewed" : session.status === "pending_review" ? "Pending" : "Draft"}
                       </Badge>
                     </div>
                   </div>

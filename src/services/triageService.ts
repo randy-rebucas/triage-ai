@@ -41,15 +41,15 @@ export async function startTriageSession(
 ): Promise<{ session: ITriageSession; firstQuestion: string; questionId: string }> {
   await connectDB();
 
-  const account       = await resolveAccount(patientCode);
+  const account        = await resolveAccount(patientCode);
   const emergencyFlags = checkEmergencyKeywords(input.chiefComplaint);
 
   const session = await TriageSession.create({
-    tenantId:      tenantId ? new Types.ObjectId(tenantId) : undefined,
-    patientId:     account._id,
+    tenantId:       tenantId ? new Types.ObjectId(tenantId) : undefined,
+    patientId:      account._id,
     chiefComplaint: input.chiefComplaint,
-    status:        "in-progress",
-    safetyFlags:   emergencyFlags.map((flag) => ({ flag, severity: "emergency" as const })),
+    status:         "in-progress",
+    safetyFlags:    emergencyFlags.map((flag) => ({ flag, severity: "emergency" as const })),
   });
 
   const patientAge = account.dateOfBirth && account.dateOfBirth.getFullYear() > 1970
@@ -57,10 +57,10 @@ export async function startTriageSession(
     : undefined;
 
   const firstQ = await generateNextQuestion({
-    chiefComplaint: input.chiefComplaint,
+    chiefComplaint:    input.chiefComplaint,
     answeredQuestions: [],
     patientAge,
-    patientGender: account.sex,
+    patientGender:     account.sex,
   });
 
   await TriageSession.findByIdAndUpdate(session._id, { totalQuestions: 8 });
@@ -98,15 +98,15 @@ export async function submitAnswer(
     throw new Error("This triage session is already completed.");
   }
 
-  const answeredQuestions = session.questions
+  const answeredQuestions = session.qaFlow
     .filter((q: { answer: string }) => q.answer)
     .map((q: { question: string; answer: string }) => ({ question: q.question, answer: q.answer }));
 
-  const lastQuestion = session.questions.length > 0
-    ? session.questions[session.questions.length - 1]
+  const lastQuestion = session.qaFlow.length > 0
+    ? session.qaFlow[session.qaFlow.length - 1]
     : null;
 
-  const questionEntry = {
+  const qaEntry = {
     questionId: `q_${session.currentQuestionIndex + 1}`,
     question:   lastQuestion?.question || `Question ${session.currentQuestionIndex + 1}`,
     answer:     input.answer,
@@ -115,7 +115,7 @@ export async function submitAnswer(
 
   const updatedQuestions = [
     ...answeredQuestions,
-    { question: questionEntry.question, answer: input.answer },
+    { question: qaEntry.question, answer: input.answer },
   ];
 
   const patientAge = account.dateOfBirth && account.dateOfBirth.getFullYear() > 1970
@@ -130,7 +130,7 @@ export async function submitAnswer(
   });
 
   await TriageSession.findByIdAndUpdate(sessionId, {
-    $push: { questions: questionEntry },
+    $push: { qaFlow: qaEntry },
     $inc:  { currentQuestionIndex: 1 },
   });
 
@@ -142,10 +142,22 @@ export async function submitAnswer(
   }
 
   await TriageSession.findByIdAndUpdate(sessionId, {
-    $push: { questions: { questionId: nextQ.questionId, question: nextQ.question, answer: "", answeredAt: new Date() } },
+    $push: {
+      qaFlow: {
+        questionId: nextQ.questionId,
+        question:   nextQ.question,
+        answer:     "",
+        answeredAt: new Date(),
+      },
+    },
   });
 
-  return { isComplete: false, nextQuestion: nextQ.question, nextQuestionId: nextQ.questionId, progress: nextQ.progress };
+  return {
+    isComplete:     false,
+    nextQuestion:   nextQ.question,
+    nextQuestionId: nextQ.questionId,
+    progress:       nextQ.progress,
+  };
 }
 
 async function completeTriageSession(
@@ -180,7 +192,7 @@ async function completeTriageSession(
     allergies,
   });
 
-  const session      = await TriageSession.findById(sessionId);
+  const session       = await TriageSession.findById(sessionId);
   const existingFlags = session?.safetyFlags || [];
   const mergedFlags   = [
     ...existingFlags,
@@ -189,13 +201,22 @@ async function completeTriageSession(
     ),
   ];
 
+  const aiReport = {
+    summary:            reportResult.summary,
+    possibleConditions: reportResult.possibleConditions,
+    recommendations:    reportResult.recommendations,
+    urgency:            reportResult.urgency,
+    disclaimer:         reportResult.disclaimer,
+  };
+
   const updated = await TriageSession.findByIdAndUpdate(
     sessionId,
     {
-      riskScore: riskResult.riskScore, riskLevel: riskResult.riskLevel as RiskLevel,
-      safetyFlags: mergedFlags, possibleConditions: reportResult.possibleConditions,
-      aiSummary: reportResult.aiSummary, recommendations: reportResult.recommendations,
-      status: "completed",
+      riskScore:   riskResult.riskScore,
+      riskLevel:   riskResult.riskLevel as RiskLevel,
+      safetyFlags: mergedFlags,
+      aiReport,
+      status:      "pending_review",
     },
     { new: true }
   );
@@ -211,7 +232,11 @@ export async function getTriageSession(
 ): Promise<ITriageSession> {
   await connectDB();
 
-  const session = await TriageSession.findOne({ _id: sessionId, ...tenantFilter(tenantId) }).lean() as unknown as ITriageSession | null;
+  const session = await TriageSession.findOne({
+    _id: sessionId,
+    ...tenantFilter(tenantId),
+  }).lean() as unknown as ITriageSession | null;
+
   if (!session) throw new Error("Triage session not found.");
 
   if (role === "patient") {

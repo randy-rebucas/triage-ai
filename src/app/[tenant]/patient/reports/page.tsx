@@ -50,15 +50,15 @@ export default async function PatientReportsPage({ params }: Props) {
                       <span className="text-sm text-gray-500">
                         {format(new Date(session.createdAt), "MMMM d, yyyy 'at' h:mm a")}
                       </span>
-                      {session.status === "validated" && (
+                      {session.status === "reviewed" && (
                         <span className="text-xs text-green-600 font-medium">✓ Reviewed</span>
                       )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <RiskBadge level={session.riskLevel} />
-                    <Badge variant={session.status === "validated" ? "success" : session.status === "completed" ? "info" : "default"}>
-                      {session.status === "validated" ? "Reviewed" : session.status === "completed" ? "Pending" : "Draft"}
+                    <Badge variant={session.status === "reviewed" ? "success" : session.status === "pending_review" ? "info" : "default"}>
+                      {session.status === "reviewed" ? "Reviewed" : session.status === "pending_review" ? "Pending" : "Draft"}
                     </Badge>
                     <span className="text-gray-400">→</span>
                   </div>
