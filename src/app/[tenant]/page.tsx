@@ -1,16 +1,11 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { verifyToken, extractTokenFromCookie } from "@/lib/auth/jwt";
 
 // ─────────────────────────────────────────────────────────────────
 // Clinic Entry Page — /{tenant}
 //
-// Pure redirect: checks the session cookie and sends the user to
-// the appropriate page. No UI is rendered.
-//
-//   Authenticated patient  → /{tenant}/patient/profile
-//   Authenticated doctor   → /{tenant}/doctor/dashboard
-//   No valid session       → /{tenant}/login
+// Redirects to patient profile if a patient_session cookie exists,
+// otherwise sends to the login page.
 // ─────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -18,24 +13,13 @@ interface Props {
 }
 
 export default async function ClinicEntryPage({ params }: Props) {
-  const { tenant } = await params;
+  const { tenant }   = await params;
+  const cookieStore  = await cookies();
+  const token        = cookieStore.get("patient_session")?.value;
 
-  const cookieStore = await cookies();
-  const token = extractTokenFromCookie(cookieStore.toString());
-
-  if (!token) {
-    redirect(`/${tenant}/login`);
+  if (token) {
+    redirect(`/${tenant}/patient/profile`);
   }
 
-  try {
-    const payload = verifyToken(token);
-    if (payload.role === "patient") {
-      redirect(`/${tenant}/patient/profile`);
-    } else {
-      redirect(`/${tenant}/doctor/dashboard`);
-    }
-  } catch {
-    // Expired or invalid token — send to login
-    redirect(`/${tenant}/login`);
-  }
+  redirect(`/${tenant}/login`);
 }

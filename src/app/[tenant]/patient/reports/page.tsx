@@ -1,7 +1,5 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
-import { verifyToken, extractTokenFromCookie } from "@/lib/auth/jwt";
 import { getTenantId } from "@/lib/tenant";
 import { getPatientTriageSessions } from "@/services/triageService";
 import { Card } from "@/components/ui/Card";
@@ -15,15 +13,12 @@ export const metadata: Metadata = { title: "My Reports" };
 interface Props { params: Promise<{ tenant: string }> }
 
 export default async function PatientReportsPage({ params }: Props) {
-  const { tenant } = await params;
+  const { tenant }     = await params;
+  const headerStore    = await headers();
+  const patientCode    = headerStore.get("x-patient-code") ?? "";
+  const tenantId       = await getTenantId();
 
-  const cookieStore = await cookies();
-  const token = extractTokenFromCookie(cookieStore.toString());
-  if (!token) redirect(`/${tenant}/login`);
-
-  const payload = verifyToken(token);
-  const tenantId = payload.tenantId || (await getTenantId());
-  const { sessions, total } = await getPatientTriageSessions(payload.userId, tenantId, 1, 20);
+  const { sessions, total } = await getPatientTriageSessions(patientCode, tenantId, 1, 20);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -35,9 +30,13 @@ export default async function PatientReportsPage({ params }: Props) {
       {sessions.length === 0 ? (
         <Card className="text-center py-16">
           <div className="text-5xl mb-4">📋</div>
-          <h3 className="font-semibold text-gray-900 mb-2">No reports yet</h3>
-          <p className="text-gray-500 text-sm mb-6">Complete a symptom assessment to see your first report</p>
-          <Link href={`/${tenant}/patient/triage`}><Button>Start Assessment</Button></Link>
+          <p className="font-semibold text-gray-900 text-lg mb-2">No reports yet</p>
+          <p className="text-sm text-gray-500 mb-6">
+            Complete a symptom assessment to see your report here.
+          </p>
+          <Link href={`/${tenant}/patient/triage`}>
+            <Button>Start Your First Assessment →</Button>
+          </Link>
         </Card>
       ) : (
         <div className="space-y-3">
@@ -49,17 +48,17 @@ export default async function PatientReportsPage({ params }: Props) {
                     <p className="font-medium text-gray-900 truncate">{session.chiefComplaint}</p>
                     <div className="flex items-center gap-3 mt-1">
                       <span className="text-sm text-gray-500">
-                        {format(new Date(session.createdAt), "MMMM d, yyyy")}
+                        {format(new Date(session.createdAt), "MMMM d, yyyy 'at' h:mm a")}
                       </span>
                       {session.status === "validated" && (
-                        <span className="text-xs text-green-600 font-medium">✓ Doctor reviewed</span>
+                        <span className="text-xs text-green-600 font-medium">✓ Reviewed</span>
                       )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <RiskBadge level={session.riskLevel} />
                     <Badge variant={session.status === "validated" ? "success" : session.status === "completed" ? "info" : "default"}>
-                      {session.status === "validated" ? "Reviewed" : session.status === "completed" ? "Pending" : "In Progress"}
+                      {session.status === "validated" ? "Reviewed" : session.status === "completed" ? "Pending" : "Draft"}
                     </Badge>
                     <span className="text-gray-400">→</span>
                   </div>

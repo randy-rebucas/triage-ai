@@ -1,7 +1,6 @@
-import { cookies } from "next/headers";
-import { redirect, notFound } from "next/navigation";
+import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 import Link from "next/link";
-import { verifyToken, extractTokenFromCookie } from "@/lib/auth/jwt";
 import { getTenantId } from "@/lib/tenant";
 import { getTriageSession } from "@/services/triageService";
 import { ReportCard } from "@/components/patient/ReportCard";
@@ -14,17 +13,13 @@ interface Props { params: Promise<{ tenant: string; sessionId: string }> }
 
 export default async function PatientReportDetailPage({ params }: Props) {
   const { tenant, sessionId } = await params;
-
-  const cookieStore = await cookies();
-  const token = extractTokenFromCookie(cookieStore.toString());
-  if (!token) redirect(`/${tenant}/login`);
-
-  const payload = verifyToken(token);
-  const tenantId = payload.tenantId || (await getTenantId());
+  const headerStore           = await headers();
+  const patientCode           = headerStore.get("x-patient-code") ?? "";
+  const tenantId              = await getTenantId();
 
   let session;
   try {
-    session = await getTriageSession(sessionId, payload.userId, "patient", tenantId);
+    session = await getTriageSession(sessionId, patientCode, "patient", tenantId);
   } catch {
     notFound();
   }
@@ -35,9 +30,8 @@ export default async function PatientReportDetailPage({ params }: Props) {
         <Link href={`/${tenant}/patient/reports`}>
           <Button variant="ghost" size="sm">← Back to Reports</Button>
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">Assessment Report</h1>
       </div>
-      <ReportCard session={session} role="patient" />
+      <ReportCard session={session} />
     </div>
   );
 }

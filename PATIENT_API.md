@@ -1,9 +1,9 @@
 # Patient API Documentation
 
 **Base path:** `/api/patients`
-**Last updated:** 2026-04-04
+**Last updated:** 2026-04-05
 
-This document covers every patient-facing API endpoint — authentication, self-service portal data, and public registration. Staff-only CRUD endpoints (e.g. `GET /api/patients`, `DELETE /api/patients/[id]`) are documented in the Staff API docs.
+This document covers every patient-facing API endpoint — authentication, self-service portal data, public registration, and third-party app integration. Staff-only CRUD endpoints (e.g. `GET /api/patients`, `DELETE /api/patients/[id]`) are documented in the Staff API docs.
 
 ---
 
@@ -12,18 +12,21 @@ This document covers every patient-facing API endpoint — authentication, self-
 1. [Authentication Overview](#1-authentication-overview)
 2. [Rate Limiting](#2-rate-limiting)
 3. [Authentication Endpoints](#3-authentication-endpoints)
-   - [POST /api/patients/auth/login](#31-post-apipatientsauthlogin) — Email + password
-   - [POST /api/patients/auth/otp/request](#32-post-apipatientsauthotoprequest) — Request OTP via SMS
-   - [POST /api/patients/auth/otp/verify](#33-post-apipatientsauthotpverify) — Verify OTP
-   - [POST /api/patients/qr-login](#34-post-apipatientsqr-login) — QR code login
-   - [GET /api/patients/session](#35-get-apipatientssession) — Get session + clinical data
-   - [DELETE /api/patients/session](#36-delete-apipatientssession) — Logout
+   - [POST /api/patients/auth/login](#31-post-apipatientsauthlogin) — Email + password (cookie)
+   - [POST /api/patients/auth/otp/request](#32-post-apipatientsauthotprequest) — Request OTP via SMS
+   - [POST /api/patients/auth/otp/verify](#33-post-apipatientsauthotpverify) — Verify OTP (cookie)
+   - [POST /api/patients/auth/token](#34-post-apipatientsauthtoken) — Issue Bearer token (third-party apps)
+   - [POST /api/patients/auth/setup-credentials](#35-post-apipatientsauthsetup-credentials) — Set email + password
+   - [POST /api/patients/qr-login](#36-post-apipatientsqr-login) — QR code login
+   - [GET /api/patients/session](#37-get-apipatientssession) — Get session + clinical data
+   - [DELETE /api/patients/session](#38-delete-apipatientssession) — Logout
 4. [Public Endpoints](#4-public-endpoints)
    - [POST /api/patients/public](#41-post-apipatientspublic) — Self-registration
+   - [GET /api/patients/lookup](#42-get-apipatientslookup) — Patient lookup for third-party apps
 5. [Patient Portal — Self-Service](#5-patient-portal--self-service)
    - [GET /api/patients/me](#51-get-apipatientsme) — Get own profile
    - [PATCH /api/patients/me](#52-patch-apipatientsme) — Update own profile
-   - [POST /api/patients/me/change-password](#53-post-apipatientsmchange-password)
+   - [POST /api/patients/me/change-password](#53-post-apipatientsmechange-password)
    - [GET /api/patients/me/visits](#54-get-apipatientsmevisits)
    - [GET /api/patients/me/visits/[id]](#55-get-apipatientsmevisitsid)
    - [GET /api/patients/me/prescriptions](#56-get-apipatientsmeprescriptions)
@@ -44,9 +47,16 @@ This document covers every patient-facing API endpoint — authentication, self-
 
 ## 1. Authentication Overview
 
-All patient portal routes require a valid `patient_session` cookie. This cookie is an **HS256 JWT** signed with `SESSION_SECRET`, set as `HttpOnly`, `SameSite=Lax`, valid for **7 days**.
+Patient portal routes accept credentials via **two carriers** — choose the one appropriate for the client type:
 
-### Session payload structure
+| Carrier | Header / Cookie | Issued by | TTL | Best for |
+|---|---|---|---|---|
+| `patient_session` cookie | `Cookie: patient_session=<jwt>` | `/auth/login`, `/auth/otp/verify`, `/qr-login` | 7 days | Browser / web portal |
+| Bearer token | `Authorization: Bearer <jwt>` | `/auth/token` | 30 days | Third-party apps, mobile apps |
+
+Both carriers carry the **same HS256 JWT payload** signed with `SESSION_SECRET`. All protected routes (`/me/*`, `/appointments`, `/session`) accept either one — the cookie is checked first, then the Authorization header.
+
+### JWT payload structure
 
 ```json
 {
@@ -59,32 +69,58 @@ All patient portal routes require a valid `patient_session` cookie. This cookie 
 }
 ```
 
-### How to authenticate (login flow)
+### Login flow — web portal (cookie-based)
 
 ```
 Choose one:
-  ┌──────────────────┐    ┌─────────────────────────────┐    ┌──────────────────────────────┐
-  │  QR code scan    │    │  Email + password            │    │  Phone OTP                   │
-  │  POST /qr-login  │    │  POST /auth/login            │    │  POST /auth/otp/request      │
-  └────────┬─────────┘    └─────────────┬───────────────┘    │  POST /auth/otp/verify       │
-           │                            │                     └──────────────┬───────────────┘
-           └────────────────────────────┴──────────────────────────────────┘
-                                        │
-                              patient_session cookie set
-                                        │
-                              Access /api/patients/me/*
+  ┌──────────────────┐    ┌──────────────────────┐    ┌───────────────────────────────┐
+  │  QR code scan    │    │  Email + password     │    │  Phone OTP                    │
+  │  POST /qr-login  │    │  POST /auth/login     │    │  POST /auth/otp/request       │
+  └────────┬─────────┘    └──────────┬────────────┘    │  POST /auth/otp/verify        │
+           │                         │                  └──────────────┬────────────────┘
+           └─────────────────────────┴──────────────────────────────┘
+                                     │
+                           patient_session cookie set
+                                     │
+                    GET /api/patients/me/* (cookie auto-sent by browser)
+```
+
+### Login flow — third-party app (Bearer token)
+
+```
+1. GET  /api/patients/lookup?tenantId=…&phone=…      ← confirm patient exists + get authMethods
+2a. POST /api/patients/auth/token  { method:"password", email, password, tenantId }
+2b. POST /api/patients/auth/otp/request { phone, tenantId }
+    POST /api/patients/auth/token  { method:"otp", phone, otp, tenantId }
+                                     │
+                           { token, expiresIn } returned in JSON body
+                                     │
+    GET /api/patients/me             ← Authorization: Bearer <token>
+```
+
+### First-time credential setup (no password yet)
+
+```
+Patient has QR card but no email/password:
+
+1. POST /api/patients/auth/otp/request  { phone, tenantId }
+2. POST /api/patients/auth/token        { method:"otp", phone, otp, tenantId }
+   → receive Bearer token
+3. POST /api/patients/auth/setup-credentials  (Bearer token in header)
+   { email: "jane@example.com", password: "SecurePass123" }
+   → credentials saved; patient can now use email+password on all future logins
 ```
 
 ---
 
 ## 2. Rate Limiting
 
-Authentication endpoints use **strict rate limiting** (5 requests per 15-minute window per IP). Exceeding the limit returns HTTP 429 with a `Retry-After` header.
-
 | Endpoint group | Limiter | Window | Max requests |
 |---|---|---|---|
-| Auth (`/auth/*`, `/qr-login`) | `auth` | 15 min | 5 |
-| Public registration | `public` | 1 min | 20 |
+| Auth endpoints (`/auth/*`, `/qr-login`) | `auth` | 15 min | 5 |
+| `/auth/token` | `auth` | 15 min | 5 |
+| `/patients/lookup` | `public` | 15 min | 10 |
+| Public registration (`/public`) | `public` | 1 min | 20 |
 | Portal data (`/me/*`, `/appointments`) | None (session-gated) | — | — |
 
 **429 response:**
@@ -248,7 +284,136 @@ Cookie set: `patient_session` (HttpOnly, 7 days)
 
 ---
 
-### 3.4 POST /api/patients/qr-login
+### 3.4 POST /api/patients/auth/token
+
+Issues a long-lived **Bearer token** in the response body for use by third-party and mobile applications. Supports two authentication methods selected via the `method` field.
+
+Unlike `/auth/login` and `/auth/otp/verify`, this endpoint returns the JWT in the JSON response rather than setting a cookie. The third-party app stores the token securely and sends it as `Authorization: Bearer <token>` on subsequent requests.
+
+**Auth required:** No  
+**Rate limited:** Yes (auth limiter)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `method` | string | Yes | `"password"` or `"otp"` |
+| `email` | string | Conditional | Required when `method = "password"` |
+| `password` | string | Conditional | Required when `method = "password"` |
+| `phone` | string | Conditional | Required when `method = "otp"` |
+| `otp` | string | Conditional | Required when `method = "otp"`. Call `/auth/otp/request` first. |
+| `tenantId` | string | No | Scopes the patient lookup to a specific clinic. |
+
+**Example — password method:**
+```json
+{
+  "method": "password",
+  "email": "jane.doe@example.com",
+  "password": "MySecurePass123",
+  "tenantId": "664abc123def456789000001"
+}
+```
+
+**Example — OTP method:**
+```json
+{
+  "method": "otp",
+  "phone": "+63 917 123 4567",
+  "otp": "482916",
+  "tenantId": "664abc123def456789000001"
+}
+```
+
+**Success response — 200:**
+```json
+{
+  "success": true,
+  "message": "Authentication successful",
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "tokenType": "Bearer",
+  "expiresIn": 2592000,
+  "patient": {
+    "id": "664abc...",
+    "patientCode": "CLINIC-0001",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "email": "jane.doe@example.com"
+  }
+}
+```
+
+> `expiresIn` is in seconds. `2592000` = 30 days.
+
+**Usage in subsequent requests:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+```
+
+**Error responses:**
+
+| Status | Condition | Error |
+|---|---|---|
+| 400 | Missing `method` or required fields | `"Invalid method. Use 'password' or 'otp'."` |
+| 401 | Wrong email/password | `"Invalid email or password"` |
+| 401 | No password set on account | `"This account has no password set..."`, `code: "NO_PASSWORD"` |
+| 401 | Wrong or expired OTP | `"Invalid or expired OTP"` |
+| 403 | Account inactive | `"Account is inactive. Please contact the clinic."` |
+| 429 | Rate limit exceeded | — |
+
+> When `code: "NO_PASSWORD"` is returned, use `method: "otp"` to log in, then call `/auth/setup-credentials` to set a password.
+
+---
+
+### 3.5 POST /api/patients/auth/setup-credentials
+
+Registers or updates the email and password a patient uses to log into third-party applications. Requires an active session (cookie **or** Bearer token).
+
+**Auth required:** Yes (cookie or Bearer token)  
+**Rate limited:** No
+
+**Typical use:**
+- Patient first logs in via OTP to get a Bearer token, then calls this endpoint to register permanent credentials.
+- Can also be used from the patient portal (web) to set/update third-party login credentials.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `password` | string | Yes | New password (min 8 characters) |
+| `email` | string | No | Login email. If omitted, existing email is kept. |
+| `currentPassword` | string | Conditional | Required if the patient already has a password set. |
+
+```json
+{
+  "email": "jane.doe@example.com",
+  "password": "NewSecurePass456",
+  "currentPassword": "OldPass123"
+}
+```
+
+**Success response — 200:**
+```json
+{
+  "success": true,
+  "message": "Credentials saved. You can now log in with email and password on any supported application.",
+  "email": "jane.doe@example.com"
+}
+```
+
+**Error responses:**
+
+| Status | Condition | Error |
+|---|---|---|
+| 400 | `password` missing or < 8 chars | `"Password must be at least 8 characters long"` |
+| 400 | `currentPassword` missing when one already exists | `"currentPassword is required when updating an existing password"` |
+| 400 | Invalid email format | `"Invalid email format"` |
+| 401 | `currentPassword` is wrong | `"Current password is incorrect"` |
+| 403 | Account inactive | `"Account is inactive."` |
+| 409 | Email already taken by another patient | `"This email is already registered to another patient..."` |
+
+---
+
+### 3.6 POST /api/patients/qr-login
 
 Authenticates a patient by scanning their clinic-issued QR code.
 
@@ -300,11 +465,11 @@ Authenticates a patient by scanning their clinic-issued QR code.
 
 ---
 
-### 3.5 GET /api/patients/session
+### 3.7 GET /api/patients/session
 
 Returns the authenticated patient's profile and optionally their related clinical data in a single request.
 
-**Auth required:** Yes (`patient_session` cookie)
+**Auth required:** Yes (`patient_session` cookie **or** `Authorization: Bearer` header)
 
 **Query parameters:**
 
@@ -354,7 +519,7 @@ GET /api/patients/session?include=all
 
 ---
 
-### 3.6 DELETE /api/patients/session
+### 3.8 DELETE /api/patients/session
 
 Logs the patient out by clearing the `patient_session` cookie.
 
@@ -415,9 +580,82 @@ Patient self-registration. No authentication required. Creates a new patient rec
 
 ---
 
+### 4.2 GET /api/patients/lookup
+
+Public endpoint for third-party applications. Confirms whether a patient exists in a specific clinic and returns **masked** identity data so the patient can verify their account. Also returns `authMethods` so the app knows which login form to render.
+
+**Auth required:** No  
+**Rate limited:** Yes (public limiter — 10 req / 15 min per IP)
+
+**Query parameters:**
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `tenantId` | string | Yes | MongoDB ObjectId of the clinic (from `/api/tenants/directory`) |
+| `phone` | string | At least one required | Patient's registered phone number |
+| `email` | string | At least one required | Patient's registered email address |
+| `patientCode` | string | At least one required | Clinic-issued patient code (e.g. `CLINIC-0001`) |
+
+Multiple identifiers can be sent together and are OR'd.
+
+**Example:**
+```
+GET /api/patients/lookup?tenantId=664abc...&phone=%2B639171234567
+GET /api/patients/lookup?tenantId=664abc...&email=jane%40example.com
+GET /api/patients/lookup?tenantId=664abc...&patientCode=CLINIC-0001
+```
+
+**Success response — patient found (200):**
+```json
+{
+  "success": true,
+  "found": true,
+  "patient": {
+    "patientCode": "CLINIC-0001",
+    "firstName": "Jane",
+    "maskedLastName": "D***",
+    "maskedEmail": "j***@example.com",
+    "maskedPhone": "+63*****4567",
+    "active": true
+  },
+  "authMethods": {
+    "password": true,
+    "otp": true
+  }
+}
+```
+
+**Response — patient not found (200):**
+```json
+{
+  "success": false,
+  "found": false
+}
+```
+
+> The endpoint always returns HTTP 200 for both found and not-found cases to prevent patient enumeration.
+
+**`authMethods` — what to show in the app UI:**
+
+| `password` | `otp` | Recommended UI |
+|---|---|---|
+| `true` | `true` | Email+password form with "Login with OTP" option |
+| `true` | `false` | Email+password form only |
+| `false` | `true` | OTP form + link to set up credentials |
+| `false` | `false` | "Contact your clinic to set up app access" |
+
+**Error responses:**
+
+| Status | Condition |
+|---|---|
+| 400 | `tenantId` missing or invalid format |
+| 400 | None of `phone`, `email`, `patientCode` provided |
+
+---
+
 ## 5. Patient Portal — Self-Service
 
-All routes in this section require the `patient_session` cookie. All return 401 if unauthenticated, 403 if the account is inactive.
+All routes in this section require authentication via `patient_session` cookie **or** `Authorization: Bearer <token>` header. All return 401 if unauthenticated, 403 if the account is inactive.
 
 ---
 
@@ -425,7 +663,7 @@ All routes in this section require the `patient_session` cookie. All return 401 
 
 Returns the complete patient profile of the currently authenticated patient.
 
-**Auth required:** Yes
+**Auth required:** Yes (cookie or Bearer token)
 
 **Success response — 200:**
 ```json
@@ -466,13 +704,15 @@ Returns the complete patient profile of the currently authenticated patient.
     "allergies": [],
     "discountEligibility": {},
     "active": true,
+    "hasPassword": true,
     "createdAt": "2024-01-10T08:00:00.000Z",
     "updatedAt": "2024-04-01T10:30:00.000Z"
   }
 }
 ```
 
-> `password`, `otp`, `otpExpiry`, `otpAttempts` are never returned (schema `select: false`).
+> `password`, `otp`, `otpExpiry`, `otpAttempts` are **never** returned (schema `select: false`).  
+> `hasPassword` is a derived boolean indicating whether the patient has a password set — useful for third-party app UIs to decide whether to show a "Set Password" prompt.
 
 ---
 
@@ -480,7 +720,7 @@ Returns the complete patient profile of the currently authenticated patient.
 
 Updates the patient's own profile. Only safe fields are accepted; system and auth fields are silently stripped.
 
-**Auth required:** Yes
+**Auth required:** Yes (cookie or Bearer token)
 
 **Blocked fields** (silently ignored if sent): `patientCode`, `tenantIds`, `attachments`, `password`, `otp`, `otpExpiry`, `otpAttempts`, `active`, `_id`, `__v`, `createdAt`, `updatedAt`
 
@@ -525,9 +765,11 @@ Updates the patient's own profile. Only safe fields are accepted; system and aut
 
 ### 5.3 POST /api/patients/me/change-password
 
-Sets or changes the patient's password.
+Sets or changes the patient's password. This is a self-service endpoint (requires current password when one is set).
 
-**Auth required:** Yes
+> **Third-party app alternative:** Use `POST /api/patients/auth/setup-credentials` instead — it accepts a Bearer token and follows the same logic. Staff can also reset a patient's password via `POST /api/patients/[id]/app-credentials`.
+
+**Auth required:** Yes (cookie or Bearer token)
 
 **Request body:**
 
@@ -1072,9 +1314,13 @@ All responses follow this consistent shape:
   type: "patient";         // always "patient"
   email: string;
   iat: number;             // issued at (UNIX)
-  exp: number;             // expires at (UNIX, 7 days)
+  exp: number;             // expires at (UNIX)
+                           //   cookie: 7 days  (issued by /auth/login, /auth/otp/verify, /qr-login)
+                           //   Bearer: 30 days (issued by /auth/token)
 }
 ```
+
+Both carriers use the same payload shape and signing key (`SESSION_SECRET`). All protected endpoints accept either one.
 
 ### Patient document (relevant fields)
 
@@ -1131,4 +1377,21 @@ All responses follow this consistent shape:
 
 ---
 
-*Generated from source code — `app/api/patients/` — 2026-04-04*
+### Staff credential management
+
+Staff can set or reset a patient's app credentials without knowing the existing password via a dedicated staff endpoint:
+
+| Method | Endpoint | Permission required |
+|---|---|---|
+| `GET` | `/api/patients/[id]/app-credentials` | `patients → read` |
+| `POST` | `/api/patients/[id]/app-credentials` | `patients → write` |
+
+**GET** returns `{ hasPassword: boolean, email: string | null }`.
+
+**POST** body: `{ password: string (min 8), email?: string }` — admin override, no current password required.
+
+These endpoints use staff session authentication (`verifySession` + `requirePermission`), not patient auth.
+
+---
+
+*Generated from source code — `app/api/patients/` — 2026-04-05*

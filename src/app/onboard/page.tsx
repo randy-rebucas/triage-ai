@@ -2,10 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
 // ─────────────────────────────────────────────────────────────────
 // Onboarding Page — self-service clinic registration
-// POST /api/tenants/onboard
+//
+// Calls the LOCAL /api/tenants/onboard which:
+//   1. Creates Tenant + admin User + Settings in the local MongoDB
+//      (required for staff login, triage, and clinical records)
+//   2. Also registers the clinic with the external myclinicsoft API
+//      (for the global tenant directory and patient portal)
 // ─────────────────────────────────────────────────────────────────
 
 interface FormState {
@@ -65,15 +69,15 @@ export default function OnboardPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: form.name,
-          subdomain: form.subdomain,
-          displayName: form.displayName || undefined,
-          email: form.email || undefined,
-          phone: form.phone || undefined,
-          settings: { timezone: form.timezone, currency: form.currency },
+          name:        form.name,
+          subdomain:   form.subdomain,
+          displayName: form.displayName  || undefined,
+          email:       form.email        || undefined,
+          phone:       form.phone        || undefined,
+          settings:    { timezone: form.timezone, currency: form.currency },
           admin: {
-            name: form.adminName,
-            email: form.adminEmail,
+            name:     form.adminName,
+            email:    form.adminEmail,
             password: form.adminPassword,
           },
         }),

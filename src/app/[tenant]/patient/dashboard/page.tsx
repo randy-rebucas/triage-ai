@@ -1,10 +1,7 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
-import { verifyToken, extractTokenFromCookie } from "@/lib/auth/jwt";
 import { getTenantId } from "@/lib/tenant";
 import { getPatientTriageSessions } from "@/services/triageService";
-import { getPatientProfile } from "@/services/patientService";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { RiskBadge, Badge } from "@/components/ui/Badge";
@@ -17,127 +14,124 @@ export const metadata: Metadata = { title: "Patient Dashboard" };
 interface Props { params: Promise<{ tenant: string }> }
 
 export default async function PatientDashboardPage({ params }: Props) {
-  const { tenant } = await params;
+  const { tenant }     = await params;
+  const headerStore    = await headers();
+  const patientCode    = headerStore.get("x-patient-code") ?? "";
+  const email          = headerStore.get("x-user-email")   ?? "";
+  const tenantId       = await getTenantId();
 
-  const cookieStore = await cookies();
-  const token = extractTokenFromCookie(cookieStore.toString());
-  if (!token) redirect(`/${tenant}/login`);
+  const { sessions, total } = await getPatientTriageSessions(patientCode, tenantId, 1, 5);
 
-  const payload = verifyToken(token);
-  const tenantId = payload.tenantId || (await getTenantId());
-
-  const [profile, { sessions, total }] = await Promise.all([
-    getPatientProfile(payload.userId, tenantId),
-    getPatientTriageSessions(payload.userId, tenantId, 1, 5),
-  ]);
-
-  const hasProfile = !!profile?.dateOfBirth;
   const criticalSessions = sessions.filter(
     (s) => s.riskLevel === "critical" || s.riskLevel === "high"
   );
+
+  const riskCounts = sessions.reduce<Record<string, number>>((acc, s) => {
+    acc[s.riskLevel] = (acc[s.riskLevel] ?? 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <div className="space-y-8 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">
-          Welcome back, {profile?.user?.name?.split(" ")[0] || "there"} 👋
+          Welcome back{email ? `, ${email.split("@")[0]}` : ""}
         </h1>
-        <p className="mt-1 text-gray-500">
-          {total === 0
-            ? "Start your first symptom assessment below."
-            : `You have ${total} assessment${total !== 1 ? "s" : ""} on record.`}
-        </p>
+        <p className="mt-1 text-gray-500">Here&apos;s a summary of your health assessments.</p>
       </div>
-
-      {!hasProfile && (
-        <Alert variant="warning" title="Complete Your Profile">
-          Please complete your health profile before starting an assessment.
-          <div className="mt-2">
-            <Button variant="outline" size="sm">Complete Profile</Button>
-          </div>
-        </Alert>
-      )}
 
       {criticalSessions.length > 0 && (
-        <Alert variant="emergency" title="Urgent Medical Attention Needed">
-          Your recent assessment flagged high-risk symptoms. Please consult your
-          doctor or seek emergency care if symptoms worsen.
+        <Alert variant="emergency" title="Action Required">
+          You have {criticalSessions.length} high-risk assessment
+          {criticalSessions.length !== 1 ? "s" : ""} that may need medical attention.
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-white hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white text-xl flex-shrink-0">🩺</div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-gray-900">Start Assessment</h3>
-              <p className="text-sm text-gray-500 mt-0.5">Describe your symptoms to our AI assistant</p>
-            </div>
-          </div>
-          <div className="mt-4">
-            <Link href={`/${tenant}/patient/triage`}>
-              <Button className="w-full" disabled={!hasProfile}>Begin Symptom Check</Button>
-            </Link>
-          </div>
-        </Card>
-
-        <Card className="hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gray-100 text-xl flex-shrink-0">📋</div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-gray-900">My Reports</h3>
-              <p className="text-sm text-gray-500 mt-0.5">View all your past assessments</p>
-            </div>
-          </div>
-          <div className="mt-4">
-            <Link href={`/${tenant}/patient/reports`}>
-              <Button variant="outline" className="w-full">View Reports ({total})</Button>
-            </Link>
-          </div>
-        </Card>
+      {/* Stats */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Total Assessments" value={total} />
+        <StatCard label="High Risk" value={(riskCounts["critical"] ?? 0) + (riskCounts["high"] ?? 0)} highlight />
+        <StatCard label="Reviewed" value={sessions.filter((s) => s.status === "validated").length} />
       </div>
 
-      {sessions.length > 0 && (
-        <Card>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Assessments</h2>
+      {/* Recent sessions */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Recent Assessments</h2>
+          {total > 5 && (
             <Link href={`/${tenant}/patient/reports`}>
               <Button variant="ghost" size="sm">View all →</Button>
             </Link>
-          </div>
-          <div className="divide-y divide-gray-100">
+          )}
+        </div>
+
+        {sessions.length === 0 ? (
+          <Card className="text-center py-12">
+            <div className="text-5xl mb-4">🩺</div>
+            <p className="font-semibold text-gray-900 mb-2">No assessments yet</p>
+            <p className="text-sm text-gray-500 mb-6">
+              Start your first AI-guided triage to get a pre-consultation report.
+            </p>
+            <Link href={`/${tenant}/patient/triage`}>
+              <Button>Start Assessment</Button>
+            </Link>
+          </Card>
+        ) : (
+          <div className="space-y-3">
             {sessions.map((session) => (
-              <Link key={session._id} href={`/${tenant}/patient/reports/${session._id}`}
-                className="flex items-center justify-between py-4 hover:bg-gray-50 -mx-6 px-6 transition-colors rounded-lg">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-gray-900 truncate">{session.chiefComplaint}</p>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    {format(new Date(session.createdAt), "MMM d, yyyy")}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                  <RiskBadge level={session.riskLevel} />
-                  <Badge variant={session.status === "validated" ? "success" : session.status === "completed" ? "info" : "default"}>
-                    {session.status === "validated" ? "Reviewed" : session.status === "completed" ? "Pending" : "Draft"}
-                  </Badge>
-                  <span className="text-gray-400 text-sm">→</span>
-                </div>
+              <Link key={session._id} href={`/${tenant}/patient/reports/${session._id}`}>
+                <Card className="hover:border-blue-300 hover:shadow-md transition-all cursor-pointer">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-gray-900 truncate">{session.chiefComplaint}</p>
+                      <span className="text-sm text-gray-500">
+                        {format(new Date(session.createdAt), "MMMM d, yyyy")}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <RiskBadge level={session.riskLevel} />
+                      <Badge variant={session.status === "validated" ? "success" : session.status === "completed" ? "info" : "default"}>
+                        {session.status === "validated" ? "Reviewed" : session.status === "completed" ? "Pending" : "Draft"}
+                      </Badge>
+                    </div>
+                  </div>
+                </Card>
               </Link>
             ))}
           </div>
-        </Card>
-      )}
+        )}
+      </div>
 
-      {sessions.length === 0 && (
-        <Card className="text-center py-12">
-          <div className="text-5xl mb-4">🏥</div>
-          <h3 className="font-semibold text-gray-900 mb-2">No assessments yet</h3>
-          <p className="text-gray-500 mb-6 text-sm">Start your first AI-powered symptom assessment</p>
-          <Link href={`/${tenant}/patient/triage`}>
-            <Button>Start Assessment</Button>
+      {/* Quick actions */}
+      <Card className="border-blue-200 bg-blue-50">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Start a new assessment</h3>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Describe your symptoms and receive an AI-generated report.
+            </p>
+          </div>
+          <Link href={`/${tenant}/patient/triage`} className="flex-shrink-0">
+            <Button className="w-full sm:w-auto">Start Assessment →</Button>
           </Link>
-        </Card>
-      )}
+        </div>
+      </Card>
+
+      <p className="text-xs text-gray-400 text-center">
+        AI assessments are for pre-consultation reference only and do not replace
+        professional medical advice.
+      </p>
     </div>
+  );
+}
+
+function StatCard({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+  return (
+    <Card className={highlight && value > 0 ? "border-red-200 bg-red-50" : ""}>
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className={`text-3xl font-bold mt-1 ${highlight && value > 0 ? "text-red-600" : "text-gray-900"}`}>
+        {value}
+      </p>
+    </Card>
   );
 }

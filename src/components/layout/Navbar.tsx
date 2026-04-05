@@ -6,25 +6,23 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 
 interface NavbarProps {
-  userName?: string;
-  userRole?: string;
+  userName?:   string;
   tenantSlug?: string;
 }
 
-export function Navbar({ userName, userRole, tenantSlug }: NavbarProps) {
-  const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
+export function Navbar({ userName, tenantSlug }: NavbarProps) {
+  const router     = useRouter();
+  const [busy, setBusy] = useState(false);
 
   const base = tenantSlug ? `/${tenantSlug}` : "";
 
   const handleLogout = async () => {
-    setIsLoading(true);
+    setBusy(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      router.push(tenantSlug ? `/${tenantSlug}/login` : "/login");
+      await fetch("/api/patients/session", { method: "DELETE" });
+    } finally {
+      router.push(tenantSlug ? `/${tenantSlug}/login` : "/");
       router.refresh();
-    } catch {
-      setIsLoading(false);
     }
   };
 
@@ -39,36 +37,20 @@ export function Navbar({ userName, userRole, tenantSlug }: NavbarProps) {
           <span className="hidden font-bold text-gray-900 sm:block">ClinicAI</span>
         </Link>
 
-        {/* Navigation links */}
+        {/* Patient navigation */}
         <nav className="hidden items-center gap-6 md:flex">
-          {userRole === "patient" && (
-            <>
-              <Link href={`${base}/patient/dashboard`}
-                className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
-                Dashboard
-              </Link>
-              <Link href={`${base}/patient/triage`}
-                className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
-                Start Assessment
-              </Link>
-              <Link href={`${base}/patient/reports`}
-                className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
-                My Reports
-              </Link>
-            </>
-          )}
-          {(userRole === "doctor" || userRole === "admin") && (
-            <>
-              <Link href={`${base}/doctor/dashboard`}
-                className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
-                Dashboard
-              </Link>
-              <Link href={`${base}/doctor/patients`}
-                className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
-                Patients
-              </Link>
-            </>
-          )}
+          <Link href={`${base}/patient/dashboard`}
+            className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
+            Dashboard
+          </Link>
+          <Link href={`${base}/patient/triage`}
+            className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
+            Start Assessment
+          </Link>
+          <Link href={`${base}/patient/reports`}
+            className="text-sm font-medium text-gray-600 transition-colors hover:text-blue-600">
+            My Reports
+          </Link>
         </nav>
 
         {/* User section */}
@@ -76,13 +58,13 @@ export function Navbar({ userName, userRole, tenantSlug }: NavbarProps) {
           {userName && (
             <div className="hidden text-right sm:block">
               <p className="text-sm font-medium text-gray-900">{userName}</p>
-              <p className="text-xs capitalize text-gray-500">{userRole}</p>
+              <p className="text-xs text-gray-500">Patient</p>
             </div>
           )}
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
             {userName?.[0]?.toUpperCase() || "?"}
           </div>
-          <Button variant="ghost" size="sm" onClick={handleLogout} isLoading={isLoading}>
+          <Button variant="ghost" size="sm" onClick={handleLogout} isLoading={busy}>
             Sign out
           </Button>
         </div>

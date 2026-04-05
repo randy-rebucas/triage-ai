@@ -41,7 +41,7 @@ export default function TriagePage() {
           <Alert variant="success" title="Assessment Submitted">
             Your symptom assessment is complete. A doctor will review your report and you will be notified of the findings.
           </Alert>
-          <ReportCard session={completedSession} role="patient" />
+          <ReportCard session={completedSession} />
           <div className="flex gap-3 flex-wrap">
             <Link href={`/${tenant}/patient/dashboard`}>
               <Button variant="outline">← Back to Dashboard</Button>

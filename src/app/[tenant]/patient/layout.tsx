@@ -1,40 +1,35 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { verifyToken, extractTokenFromCookie } from "@/lib/auth/jwt";
-import { getTenantId } from "@/lib/tenant";
+import { headers } from "next/headers";
 import { Navbar } from "@/components/layout/Navbar";
-import { getUserById } from "@/services/authService";
 
 // ─────────────────────────────────────────────────────────────────
 // Patient Layout — /{tenant}/patient/*
-// Auth guard: validates session and ensures patient role.
+//
+// The middleware has already verified the patient_session JWT and
+// injected x-user-email and x-patient-code into the request headers.
+// We read those here instead of re-parsing the cookie.
 // ─────────────────────────────────────────────────────────────────
 
 interface Props {
   children: React.ReactNode;
-  params: Promise<{ tenant: string }>;
+  params:   Promise<{ tenant: string }>;
 }
 
 export default async function PatientLayout({ children, params }: Props) {
   const { tenant } = await params;
 
-  const cookieStore = await cookies();
-  const token = extractTokenFromCookie(cookieStore.toString());
+  const headerStore  = await headers();
+  const email        = headerStore.get("x-user-email");
+  const patientCode  = headerStore.get("x-patient-code");
 
-  if (!token) redirect(`/${tenant}/login`);
+  // If middleware didn't inject these, the patient isn't authenticated.
+  if (!email && !patientCode) redirect(`/${tenant}/login`);
 
-  let user;
-  try {
-    const payload = verifyToken(token);
-    if (payload.role !== "patient") redirect(`/${tenant}/doctor/dashboard`);
-    user = await getUserById(payload.userId);
-  } catch {
-    redirect(`/${tenant}/login`);
-  }
+  const displayName = email || patientCode || "Patient";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userName={user?.name} userRole="patient" tenantSlug={tenant} />
+      <Navbar userName={displayName} tenantSlug={tenant} />
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         {children}
       </main>

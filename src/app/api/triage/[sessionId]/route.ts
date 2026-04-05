@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { withAuth, type RouteContext } from "@/lib/api/withAuth";
+import { withPatientAuth, type PatientRouteContext } from "@/lib/api/withPatientAuth";
 import { getTriageSession } from "@/services/triageService";
 import { getTenantId } from "@/lib/tenant";
 import {
@@ -7,68 +7,55 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api/response";
-import { logAudit, getClientIP } from "@/services/auditService";
-import type { IAuthPayload } from "@/types";
+import type { IPatientJwtPayload } from "@/lib/auth/patientJwt";
 
 // ─────────────────────────────────────────────────────────────────
 // GET /api/triage/[sessionId]
-// Retrieve a triage session. Patients see own sessions only.
-// Doctors see all completed/validated sessions.
+//
+// Returns the patient's own triage session in a sanitised view.
+// Possible conditions and raw AI internals are never exposed.
 // ─────────────────────────────────────────────────────────────────
 
 async function handler(
   req: NextRequest,
-  user: IAuthPayload,
-  context: RouteContext
+  patient: IPatientJwtPayload,
+  context: PatientRouteContext
 ): Promise<Response> {
   try {
-    const params = await context.params;
+    const params    = await context.params;
     const sessionId = params?.sessionId;
 
-    if (!sessionId) {
-      return errorResponse("Session ID is required", 400);
-    }
+    if (!sessionId) return errorResponse("Session ID is required", 400);
 
-    const tenantId = user.tenantId || (await getTenantId());
-    const session = await getTriageSession(sessionId, user.userId, user.role, tenantId);
+    const tenantId = await getTenantId();
+    const session  = await getTriageSession(sessionId, patient.patientId, "patient", tenantId);
 
-    // Patients get a sanitised view — no raw AI internals
-    const responseData =
-      user.role === "patient"
+    // Patients see recommendations + safety info only — no raw AI conditions
+    return successResponse({
+      _id:             session._id,
+      chiefComplaint:  session.chiefComplaint,
+      status:          session.status,
+      riskLevel:       session.riskLevel,
+      recommendations: session.recommendations,
+      safetyFlags:     session.safetyFlags,
+      doctorValidation: session.doctorValidation
         ? {
-            _id: session._id,
-            chiefComplaint: session.chiefComplaint,
-            status: session.status,
-            riskLevel: session.riskLevel,
-            recommendations: session.recommendations,
-            safetyFlags: session.safetyFlags,
-            // CRITICAL: Patients NEVER see possibleConditions by medical name
-            // They only see recommendations and safety info
-            disclaimer:
-              "This is an AI-assisted pre-consultation assessment. It is NOT a medical diagnosis. Please consult your doctor for proper evaluation.",
-            createdAt: session.createdAt,
+            doctorName:  session.doctorValidation.doctorName,
+            validatedAt: session.doctorValidation.validatedAt,
+            notes:       session.doctorValidation.notes,
           }
-        : session; // Doctors get full data
-
-    logAudit({
-      userId: user.userId,
-      userRole: user.role,
-      action: "view",
-      resource: "TriageSession",
-      resourceId: sessionId,
-      ipAddress: getClientIP(req.headers),
+        : undefined,
+      disclaimer:
+        "This is an AI-assisted pre-consultation assessment. It is NOT a medical diagnosis. Please consult a healthcare professional for proper evaluation.",
+      createdAt: session.createdAt,
     });
-
-    return successResponse(responseData);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to retrieve session";
-
-    if (message.includes("not found")) return errorResponse(message, 404);
+    if (message.includes("not found"))    return errorResponse(message, 404);
     if (message.includes("Access denied")) return errorResponse(message, 403);
-
-    console.error("[/api/triage/[sessionId]]", err);
+    console.error("[GET /api/triage/[sessionId]]", err);
     return serverErrorResponse();
   }
 }
 
-export const GET = withAuth(handler);
+export const GET = withPatientAuth(handler);

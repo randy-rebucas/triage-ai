@@ -7,18 +7,27 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { useTenant } from "@/context/TenantContext";
-
 // ─────────────────────────────────────────────────────────────────
 // Tenant Login Page — /{tenant}/login
 //
-// Three authentication methods backed by the patient REST API:
+// Three authentication methods backed by the external patient API:
 //   Tab 1 — Email + password   → POST /api/patients/auth/login
 //   Tab 2 — Phone OTP          → POST /api/patients/auth/otp/request
 //                                POST /api/patients/auth/otp/verify
 //   Tab 3 — QR code            → POST /api/patients/qr-login
 //
+// All calls go to LOCAL proxy routes (browser → localhost → external),
+// which avoids CORS and lets the proxy re-scope the patient_session
+// cookie to the local domain.
 // tenantId comes from TenantContext (resolved in the layout).
 // ─────────────────────────────────────────────────────────────────
+
+const apiPost = (path: string, body: unknown) =>
+  fetch(path, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(body),
+  });
 
 type Tab = "password" | "otp" | "qr";
 
@@ -73,11 +82,7 @@ export default function LoginPage() {
     setPwError(null);
 
     try {
-      const res  = await fetch("/api/patients/auth/login", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ ...pwForm, tenantId }),
-      });
+      const res  = await apiPost("/api/patients/auth/login", { ...pwForm, tenantId });
       const data = await res.json();
 
       if (!res.ok) {
@@ -106,11 +111,7 @@ export default function LoginPage() {
     setOtpError(null);
 
     try {
-      const res  = await fetch("/api/patients/auth/otp/request", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ phone, tenantId }),
-      });
+      const res  = await apiPost("/api/patients/auth/otp/request", { phone, tenantId });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error || "Failed to send OTP");
@@ -137,11 +138,7 @@ export default function LoginPage() {
     setOtpError(null);
 
     try {
-      const res  = await fetch("/api/patients/auth/otp/verify", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ phone, otp: otpCode, tenantId }),
-      });
+      const res  = await apiPost("/api/patients/auth/otp/verify", { phone, otp: otpCode, tenantId });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error || "OTP verification failed");
@@ -170,11 +167,7 @@ export default function LoginPage() {
     }
 
     try {
-      const res  = await fetch("/api/patients/qr-login", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ qrCode: parsed, tenantId }),
-      });
+      const res  = await apiPost("/api/patients/qr-login", { qrCode: parsed, tenantId });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error || "QR login failed");

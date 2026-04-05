@@ -6,16 +6,14 @@ import { format } from "date-fns";
 
 // ─────────────────────────────────────────────────────────────────
 // ReportCard — Patient-facing triage report summary
-// CRITICAL: Patients see recommendations only, NOT condition names
+// CRITICAL: Patients see recommendations only, NOT raw condition names
 // ─────────────────────────────────────────────────────────────────
 
 interface ReportCardProps {
   session: ITriageSession;
-  role?: "patient" | "doctor" | "admin";
 }
 
-export function ReportCard({ session, role = "patient" }: ReportCardProps) {
-  const isDoctor = role === "doctor" || role === "admin";
+export function ReportCard({ session }: ReportCardProps) {
   const hasEmergencyFlags = session.safetyFlags?.some(
     (f) => f.severity === "emergency"
   );
@@ -26,15 +24,13 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
       <Card>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold text-gray-900">
-              {isDoctor ? "Triage Report" : "Your Pre-Consultation Summary"}
-            </h2>
+            <h2 className="text-lg font-bold text-gray-900">Your Pre-Consultation Summary</h2>
             <p className="mt-1 text-sm text-gray-500">
               {format(new Date(session.createdAt), "PPP 'at' p")}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <RiskBadge level={session.riskLevel} score={isDoctor ? session.riskScore : undefined} />
+            <RiskBadge level={session.riskLevel} />
             <Badge
               variant={
                 session.status === "validated"
@@ -45,7 +41,7 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
               }
             >
               {session.status === "validated"
-                ? "Doctor Reviewed"
+                ? "Clinician Reviewed"
                 : session.status === "completed"
                 ? "Pending Review"
                 : "In Progress"}
@@ -58,8 +54,7 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
       {hasEmergencyFlags && (
         <Alert variant="emergency" title="Urgent Safety Notice">
           Your assessment flagged symptoms that may require prompt medical
-          attention. Please contact your doctor or seek emergency care if
-          symptoms worsen.
+          attention. Please seek emergency care if symptoms worsen.
         </Alert>
       )}
 
@@ -71,7 +66,7 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
         <p className="text-gray-700">{session.chiefComplaint}</p>
       </Card>
 
-      {/* Safety flags (patient-friendly) */}
+      {/* Safety flags */}
       {session.safetyFlags?.length > 0 && (
         <Card>
           <CardHeader>
@@ -96,7 +91,7 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
         </Card>
       )}
 
-      {/* Recommendations (shown to all) */}
+      {/* Recommendations */}
       {session.recommendations?.length > 0 && (
         <Card>
           <CardHeader>
@@ -113,100 +108,15 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
         </Card>
       )}
 
-      {/* Doctor-only section: Possible conditions and AI summary */}
-      {isDoctor && (
-        <>
-          {session.aiSummary && (
-            <Card>
-              <CardHeader>
-                <CardTitle>AI Clinical Summary</CardTitle>
-              </CardHeader>
-              <p className="text-sm text-gray-700 leading-relaxed">
-                {session.aiSummary}
-              </p>
-            </Card>
-          )}
-
-          {session.possibleConditions?.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>AI-Suggested Possible Conditions</CardTitle>
-              </CardHeader>
-              <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                These are AI-generated suggestions for clinical reference only.
-                They do not constitute a diagnosis. Doctor validation is
-                required.
-              </p>
-              <div className="space-y-3">
-                {session.possibleConditions.map((condition, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start justify-between rounded-lg border border-gray-200 p-3"
-                  >
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {condition.name}
-                      </p>
-                      <p className="text-xs text-gray-500 font-mono mt-0.5">
-                        ICD-10: {condition.icd10Code}
-                      </p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {condition.description}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        condition.likelihood === "high"
-                          ? "danger"
-                          : condition.likelihood === "moderate"
-                          ? "warning"
-                          : "default"
-                      }
-                      className="ml-3 shrink-0"
-                    >
-                      {condition.likelihood}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-        </>
-      )}
-
-      {/* Doctor validation result */}
+      {/* Clinician review note (if validated) */}
       {session.doctorValidation && (
         <Card className="border-green-200 bg-green-50">
           <CardHeader>
-            <CardTitle className="text-green-800">
-              Doctor&apos;s Assessment
-            </CardTitle>
+            <CardTitle className="text-green-800">Clinician Review</CardTitle>
           </CardHeader>
           <div className="space-y-2">
-            {isDoctor && (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Final Diagnosis
-                  </p>
-                  <p className="font-medium text-gray-900">
-                    {session.doctorValidation.finalDiagnosis}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    ICD-10 Code
-                  </p>
-                  <p className="font-mono text-gray-900">
-                    {session.doctorValidation.icd10Code}
-                  </p>
-                </div>
-              </div>
-            )}
             <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                Reviewed by
-              </p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Reviewed by</p>
               <p className="text-gray-900">
                 {session.doctorValidation.doctorName} •{" "}
                 {format(new Date(session.doctorValidation.validatedAt), "PPp")}
@@ -214,27 +124,20 @@ export function ReportCard({ session, role = "patient" }: ReportCardProps) {
             </div>
             {session.doctorValidation.notes && (
               <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  Notes
-                </p>
-                <p className="text-sm text-gray-700">
-                  {session.doctorValidation.notes}
-                </p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notes</p>
+                <p className="text-sm text-gray-700">{session.doctorValidation.notes}</p>
               </div>
             )}
           </div>
         </Card>
       )}
 
-      {/* Patient disclaimer */}
-      {!isDoctor && (
-        <Alert variant="info" title="Important Notice">
-          This summary was generated by an AI assistant to help your doctor
-          understand your symptoms better. It is{" "}
-          <strong>not a medical diagnosis</strong>. Please consult your doctor
-          for proper medical evaluation and advice.
-        </Alert>
-      )}
+      {/* Disclaimer */}
+      <Alert variant="info" title="Important Notice">
+        This summary was generated by an AI assistant to help your clinician
+        understand your symptoms. It is <strong>not a medical diagnosis</strong>.
+        Please consult a healthcare professional for proper evaluation and advice.
+      </Alert>
     </div>
   );
 }
