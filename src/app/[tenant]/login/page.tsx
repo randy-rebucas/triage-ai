@@ -355,7 +355,11 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400">
+        <p className="mt-5 text-center text-xs text-gray-500">
+          Don&apos;t have credentials?{" "}
+          <span className="font-medium text-gray-700">Ask the receptionist at {tenant} clinic to provide your Triage AI access credentials.</span>
+        </p>
+        <p className="mt-3 text-center text-xs text-gray-400">
           Protected by 256-bit encryption. Your health data is safe.
         </p>
       </div>
