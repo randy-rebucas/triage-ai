@@ -10,8 +10,9 @@ import type { ClinicalRecordInput } from "@/lib/validations/schemas";
 // Clinical Record Service — tenant-isolated
 // ─────────────────────────────────────────────────────────────────
 
-function tenantFilter(tenantId: string | null) {
-  return tenantId ? { tenantId: new Types.ObjectId(tenantId) } : {};
+function tenantFilter(tenantId: string | null): { tenantId: Types.ObjectId } {
+  if (!tenantId) throw new Error("Tenant context is required");
+  return { tenantId: new Types.ObjectId(tenantId) };
 }
 
 export async function createClinicalRecord(

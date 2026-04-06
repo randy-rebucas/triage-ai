@@ -48,15 +48,17 @@ export async function updatePatientProfile(
   if (input.medicalHistory) update.medicalHistory = input.medicalHistory;
   if (input.emergencyContact) update.emergencyContact = input.emergencyContact;
 
-  // If patient doesn't belong to this tenant yet, add the tenantId
+  const filter = { userId, ...createPatientTenantFilter(tenantId) };
+
+  // Build the full update — scalar fields via $set, tenant membership via $addToSet
+  const mongoUpdate: Record<string, unknown> = { $set: update };
   if (tenantId) {
-    update.$addToSet = { tenantIds: new Types.ObjectId(tenantId) };
+    mongoUpdate.$addToSet = { tenantIds: new Types.ObjectId(tenantId) };
   }
 
-  const filter = { userId, ...createPatientTenantFilter(tenantId) };
   const patient = await Patient.findOneAndUpdate(
     filter,
-    { $set: update },
+    mongoUpdate,
     { new: true, upsert: false }
   ).populate("userId", "-password").lean();
 

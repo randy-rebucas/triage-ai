@@ -1,75 +1,97 @@
 import "server-only";
-import { headers } from "next/headers";
-import connectDB from "@/lib/db/mongodb";
-import Tenant from "@/models/Tenant";
-import type { TenantContext, ITenant } from "@/types";
+import { headers, cookies } from "next/headers";
+import type { TenantContext } from "@/types";
 
 // ─────────────────────────────────────────────────────────────────
-// Tenant Resolution — path-based multi-tenancy
+// Tenant Resolution — cookie-based (third-party API architecture)
 //
-// The middleware extracts the tenant slug from the URL path
-// (e.g. /clinic-a/patient/dashboard → slug = "clinic-a") and
-// forwards it as the x-tenant-slug request header.
+// Tenants are managed by an external API (myclinicsoft).
+// On every /{tenant}/* page load the layout calls
+// fetchTenantValidation(slug) and caches the result in the
+// browser cookie "tenant_v_{slug}" as base64(JSON(TenantCachePayload)).
 //
-// Tenant data is resolved from the local MongoDB Tenant collection.
-// The tenant _id is used as `tenantId` to scope all clinical data.
+// API routes read the tenantId from that cookie — no local Tenant
+// MongoDB collection is required or used.
+//
+// Resolution chain for API routes:
+//   1. Read x-tenant-slug header (set by middleware from URL or Referer)
+//   2. Read tenant_v_{slug} cookie from the request
+//   3. Base64-decode + JSON-parse → extract tenantId
 // ─────────────────────────────────────────────────────────────────
+
+const COOKIE_PREFIX = "tenant_v_";
+
+interface CookiePayload {
+  valid?:    boolean;
+  exp?:      number;
+  tenantId?: string;
+  subdomain?: string;
+  name?:     string;
+  displayName?: string;
+}
+
+function parseCookiePayload(raw: string): CookiePayload | null {
+  try {
+    // atob is available in Node 16+ / Next.js 15 (Node 18+ required)
+    const json = Buffer.from(raw, "base64").toString("utf-8");
+    return JSON.parse(json) as CookiePayload;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * Resolve the tenant from the x-tenant-slug header set by middleware.
- * Queries the local MongoDB Tenant collection.
- *
- * Usage in server components, layouts, and API routes:
- *   const { tenantId, subdomain, tenant } = await getTenantContext();
+ * Resolve the current tenant from the cached tenant cookie.
+ * Returns { tenantId, subdomain, tenant: null } — tenant object
+ * is not populated (it lives in TenantContext on the client).
  */
 export async function getTenantContext(): Promise<TenantContext> {
   const headerStore = await headers();
-  const slug = headerStore.get("x-tenant-slug") || "";
+  const slug        = headerStore.get("x-tenant-slug") || "";
 
   if (!slug) {
+    console.warn("[getTenantContext] x-tenant-slug header is empty — tenant context unavailable");
     return { tenantId: null, subdomain: null, tenant: null };
   }
 
-  try {
-    await connectDB();
+  const cookieStore = await cookies();
+  const raw         = cookieStore.get(`${COOKIE_PREFIX}${slug}`)?.value;
 
-    const doc = await Tenant.findOne({ subdomain: slug, status: "active" }).lean();
-
-    if (!doc) {
-      return { tenantId: null, subdomain: slug, tenant: null };
-    }
-
-    const tenant: ITenant = {
-      _id:         doc._id,
-      name:        doc.name,
-      displayName: doc.displayName,
-      subdomain:   doc.subdomain,
-      status:      doc.status as ITenant["status"],
-      address: {
-        city:    doc.address?.city,
-        state:   doc.address?.state,
-        country: doc.address?.country,
-      },
-      settings: {
-        logo: doc.settings?.logo,
-      },
-      subscription: {
-        plan:         doc.subscription?.plan,
-        status:       doc.subscription?.status as ITenant["subscription"]["status"],
-        billingCycle: doc.subscription?.billingCycle as ITenant["subscription"]["billingCycle"],
-        expiresAt:    doc.subscription?.expiresAt,
-      },
-    } as unknown as ITenant;
-
-    return {
-      tenantId: doc._id.toString(),
-      subdomain: slug,
-      tenant,
-    };
-  } catch (err) {
-    console.error("[getTenantContext] DB error:", err);
+  if (!raw) {
+    console.warn(
+      `[getTenantContext] No cookie "tenant_v_${slug}" found in request. ` +
+      "The patient may need to visit the clinic page first to populate the tenant cache."
+    );
     return { tenantId: null, subdomain: slug, tenant: null };
   }
+
+  const payload = parseCookiePayload(raw);
+
+  if (!payload) {
+    console.warn(`[getTenantContext] Could not parse tenant cookie for slug "${slug}"`);
+    return { tenantId: null, subdomain: slug, tenant: null };
+  }
+
+  if (!payload.valid) {
+    console.warn(`[getTenantContext] Tenant cookie for "${slug}" has valid=false`);
+    return { tenantId: null, subdomain: slug, tenant: null };
+  }
+
+  if (typeof payload.exp === "number" && payload.exp < Date.now()) {
+    console.warn(`[getTenantContext] Tenant cookie for "${slug}" is expired (exp=${payload.exp})`);
+    return { tenantId: null, subdomain: slug, tenant: null };
+  }
+
+  if (!payload.tenantId) {
+    console.warn(`[getTenantContext] Tenant cookie for "${slug}" is missing tenantId field`);
+    return { tenantId: null, subdomain: slug, tenant: null };
+  }
+
+  return {
+    tenantId:  payload.tenantId,
+    subdomain: slug,
+    tenant:    null,
+  };
 }
 
 /**
@@ -82,7 +104,7 @@ export async function getTenantId(): Promise<string | null> {
 
 /**
  * Read the raw tenant slug from the x-tenant-slug header
- * without hitting the database. Useful for link generation.
+ * without hitting any database. Useful for link generation.
  */
 export async function getTenantSlug(): Promise<string | null> {
   const headerStore = await headers();
@@ -90,25 +112,23 @@ export async function getTenantSlug(): Promise<string | null> {
 }
 
 /**
- * Assert the current slug resolves to an active tenant.
- * Throws if not found. Use in routes that require a valid tenant.
+ * Assert the current request has a resolvable tenant.
+ * Throws a descriptive error if not — use in routes that require tenant context.
  */
-export async function verifyTenant(): Promise<ITenant> {
-  const { tenant, subdomain } = await getTenantContext();
-
-  if (!tenant) {
-    const msg = subdomain
-      ? `No active tenant found for slug "${subdomain}".`
-      : "This request requires a tenant context.";
-    throw new Error(msg);
+export async function requireTenantId(): Promise<string> {
+  const tenantId = await getTenantId();
+  if (!tenantId) {
+    throw new Error(
+      "Tenant context is required but could not be resolved. " +
+      "Ensure the tenant cookie is present and not expired."
+    );
   }
-
-  return tenant;
+  return tenantId;
 }
 
 /**
  * Extract tenant slug from a raw pathname string.
- * Edge-safe — no DB calls, no server-only imports.
+ * Edge-safe — no async, no cookies, no DB.
  */
 export function extractSlugFromPath(pathname: string): string | null {
   const RESERVED = new Set([

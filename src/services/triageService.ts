@@ -1,13 +1,14 @@
-import { Types } from "mongoose";
 import connectDB from "@/lib/db/mongodb";
 import TriageSession from "@/models/TriageSession";
 import PatientAccount from "@/models/PatientAccount";
 import {
   extractSymptoms,
   generateNextQuestion,
+  streamNextQuestion,
   calculateRiskScore,
   generateTriageReport,
   checkEmergencyKeywords,
+  type StreamingQuestionEvent,
 } from "@/lib/ai/triageEngine";
 import type { ITriageSession, RiskLevel } from "@/types";
 import type { TriageStartInput, TriageAnswerInput } from "@/lib/validations/schemas";
@@ -21,9 +22,9 @@ import type { TriageStartInput, TriageAnswerInput } from "@/lib/validations/sche
 // first access so triage sessions have a stable local ObjectId.
 // ─────────────────────────────────────────────────────────────────
 
-function tenantFilter(tenantId: string | null): { tenantId: Types.ObjectId } {
+function tenantFilter(tenantId: string | null): { tenantId: string } {
   if (!tenantId) throw new Error("Tenant context is required");
-  return { tenantId: new Types.ObjectId(tenantId) };
+  return { tenantId };
 }
 
 /** Find or create a local PatientAccount shadow by patientCode. */
@@ -40,15 +41,15 @@ export async function startTriageSession(
   patientCode: string,
   input: TriageStartInput,
   tenantId: string | null
-): Promise<{ session: ITriageSession; firstQuestion: string; questionId: string; inputType: "text" | "yes_no" | "slider" }> {
+): Promise<{ session: ITriageSession; firstQuestion: string; questionId: string; inputType: "text" | "yes_no" | "slider"; isEmergency: boolean }> {
   await connectDB();
 
   const account        = await resolveAccount(patientCode);
   const emergencyFlags = checkEmergencyKeywords(input.chiefComplaint);
 
   const session = await TriageSession.create({
-    tenantId:       tenantId ? new Types.ObjectId(tenantId) : undefined,
-    patientId:      account._id,
+    tenantId,
+    patientId: account._id,
     chiefComplaint: input.chiefComplaint,
     status:         "in-progress",
     safetyFlags:    emergencyFlags.map((flag) => ({ flag, severity: "emergency" as const })),
@@ -58,42 +59,76 @@ export async function startTriageSession(
     ? Math.floor((Date.now() - account.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
     : undefined;
 
-  // Stage 0 — Extract structured symptom data from the chief complaint.
-  // This seeds the questioning stage so it targets uncovered dimensions.
-  const extracted = await extractSymptoms({
-    chiefComplaint: input.chiefComplaint,
-    patientAge,
-    patientGender:  account.sex,
-  });
+  // ── Stages 0 + 1 in parallel ────────────────────────────────────
+  // Extraction (Stage 0) and first question (Stage 1) are independent
+  // enough to run concurrently. The first question is generated without
+  // extraction context (it only uses the chief complaint) — this is
+  // acceptable because the extraction context is most valuable from
+  // Q2 onwards. Running both at once halves the session-start latency.
+  const [extracted, firstQ] = await Promise.all([
+    extractSymptoms({
+      chiefComplaint: input.chiefComplaint,
+      patientAge,
+      patientGender:  account.sex,
+    }),
+    generateNextQuestion({
+      chiefComplaint:    input.chiefComplaint,
+      answeredQuestions: [],
+      patientAge,
+      patientGender:     account.sex,
+      // extractedSymptoms intentionally omitted — not yet available
+    }),
+  ]);
 
-  const firstQ = await generateNextQuestion({
-    chiefComplaint:    input.chiefComplaint,
-    answeredQuestions: [],
-    patientAge,
-    patientGender:     account.sex,
-    extractedSymptoms: extracted,
-  });
+  // ── Emergency fast-path ─────────────────────────────────────────
+  const allRedFlags = [
+    ...emergencyFlags,
+    ...extracted.redFlagLanguage,
+  ];
+
+  if (allRedFlags.length > 0 && emergencyFlags.length > 0) {
+    const completedSession = await completeTriageSession(
+      session._id.toString(),
+      [],
+      account,
+      input.chiefComplaint,
+    );
+
+    return {
+      session:       completedSession,
+      firstQuestion: "⚠️ Based on your symptoms, we have fast-tracked your assessment for immediate clinical review. Please seek emergency care now if you are in danger.",
+      questionId:    "emergency_fast_path",
+      inputType:     "text" as const,
+      isEmergency:   true,
+    };
+  }
+  // ── Normal Q&A path ─────────────────────────────────────────────
 
   // Store the first question as a pending placeholder so its text is
   // preserved when the patient submits their answer.
-  await TriageSession.findByIdAndUpdate(session._id, {
-    totalQuestions:   8,
-    extractedSymptoms: extracted,
-    $push: {
-      qaFlow: {
-        questionId: firstQ.questionId,
-        question:   firstQ.question,
-        answer:     "",
-        answeredAt: new Date(),
+  const updatedSession = await TriageSession.findByIdAndUpdate(
+    session._id,
+    {
+      totalQuestions:    8,
+      extractedSymptoms: extracted,
+      $push: {
+        qaFlow: {
+          questionId: firstQ.questionId,
+          question:   firstQ.question,
+          answer:     "",
+          answeredAt: new Date(),
+        },
       },
     },
-  });
+    { new: true },
+  );
 
   return {
-    session:       session.toJSON() as ITriageSession,
+    session:       (updatedSession ?? session).toJSON() as ITriageSession,
     firstQuestion: firstQ.question,
     questionId:    firstQ.questionId,
     inputType:     firstQ.inputType ?? "text",
+    isEmergency:   false,
   };
 }
 
@@ -207,8 +242,10 @@ async function completeTriageSession(
     ? account.allergies.map((a) => (typeof a === "string" ? a : (a as { substance: string }).substance))
     : [];
 
-  const sessionDoc = await TriageSession.findById(sessionId);
+  // Single DB fetch — reused for both extractedSymptoms and existingFlags
+  const sessionDoc        = await TriageSession.findById(sessionId);
   const extractedSymptoms = sessionDoc?.extractedSymptoms;
+  const existingFlags     = sessionDoc?.safetyFlags || [];
 
   const riskResult = await calculateRiskScore({
     chiefComplaint, answeredQuestions, patientAge,
@@ -231,9 +268,7 @@ async function completeTriageSession(
     riskReasoning:  riskResult.reasoning,
   });
 
-  const session       = await TriageSession.findById(sessionId);
-  const existingFlags = session?.safetyFlags || [];
-  const mergedFlags   = [
+  const mergedFlags = [
     ...existingFlags,
     ...riskResult.safetyFlags.filter(
       (flag) => !existingFlags.some((ef: { flag: string }) => ef.flag === flag.flag)
@@ -263,6 +298,222 @@ async function completeTriageSession(
   );
 
   return updated?.toJSON() as ITriageSession;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Streaming answer — same logic as submitAnswer but yields SSE events
+// for the next question instead of returning a JSON object.
+// ─────────────────────────────────────────────────────────────────
+
+export async function* streamAnswer(
+  sessionId:   string,
+  patientCode: string,
+  input:       { answer: string; questionId?: string },
+  tenantId:    string | null,
+): AsyncGenerator<StreamingQuestionEvent | Record<string, unknown>> {
+  await connectDB();
+
+  const session = await TriageSession.findOne({ _id: sessionId, ...tenantFilter(tenantId) });
+  if (!session) throw new Error("Triage session not found.");
+
+  const account = await PatientAccount.findOne({ patientCode });
+  if (!account || session.patientId.toString() !== account._id.toString()) {
+    throw new Error("Access denied to this triage session.");
+  }
+  if (session.status !== "in-progress") {
+    throw new Error("This triage session is already completed.");
+  }
+
+  const pendingIdx   = session.qaFlow.length - 1;
+  const pendingEntry = session.qaFlow[pendingIdx] as { question: string; questionId: string } | undefined;
+
+  const answeredQuestions = session.qaFlow
+    .slice(0, pendingIdx)
+    .filter((q: { answer: string }) => q.answer?.trim())
+    .map((q: { question: string; answer: string }) => ({ question: q.question, answer: q.answer }));
+
+  const currentQuestion  = pendingEntry?.question ?? `Question ${session.currentQuestionIndex + 1}`;
+  const updatedQuestions = [
+    ...answeredQuestions,
+    { question: currentQuestion, answer: input.answer },
+  ];
+
+  const patientAge = account.dateOfBirth && account.dateOfBirth.getFullYear() > 1970
+    ? Math.floor((Date.now() - account.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : undefined;
+
+  // Save the answer
+  await TriageSession.findByIdAndUpdate(sessionId, {
+    $set: {
+      [`qaFlow.${pendingIdx}.answer`]:     input.answer,
+      [`qaFlow.${pendingIdx}.answeredAt`]: new Date(),
+    },
+    $inc: { currentQuestionIndex: 1 },
+  });
+
+  const isLastByCount = updatedQuestions.length >= 8;
+
+  if (isLastByCount) {
+    // ── Streamed completion with live progress events ───────────
+    yield { type: "progress", step: 1, message: "Reviewing your responses…" };
+
+    // Reuse patientAge computed above — no re-calculation needed
+    const allergiesC = Array.isArray(account.allergies)
+      ? account.allergies.map((a: unknown) => (typeof a === "string" ? a : (a as { substance: string }).substance))
+      : [];
+    // Single DB fetch for extractedSymptoms + existingFlags
+    const sessionDocC     = await TriageSession.findById(sessionId);
+    const extractedC      = sessionDocC?.extractedSymptoms;
+    const existingFlagsC  = sessionDocC?.safetyFlags || [];
+    const chiefComplaintC = session.chiefComplaint;
+
+    yield { type: "progress", step: 2, message: "Calculating risk assessment…" };
+
+    const riskResult = await calculateRiskScore({
+      chiefComplaint:    chiefComplaintC,
+      answeredQuestions: updatedQuestions,
+      patientAge,
+      patientGender:     account.sex,
+      medicalHistory:    account.medicalHistory ? [account.medicalHistory] : undefined,
+      allergies:         allergiesC,
+      extractedSymptoms: extractedC,
+    });
+
+    yield { type: "progress", step: 3, message: "Generating your clinical report…" };
+
+    const reportResult = await generateTriageReport({
+      chiefComplaint:    chiefComplaintC,
+      answeredQuestions: updatedQuestions,
+      riskScore:         riskResult.riskScore,
+      riskLevel:         riskResult.riskLevel,
+      safetyFlags:       riskResult.safetyFlags,
+      patientAge,
+      patientGender:     account.sex,
+      medicalHistory:    account.medicalHistory ? [account.medicalHistory] : undefined,
+      allergies:         allergiesC,
+      extractedSymptoms: extractedC,
+      riskReasoning:     riskResult.reasoning,
+    });
+
+    // Merge safety flags (de-duplicate)
+    const mergedFlagsC = [
+      ...existingFlagsC,
+      ...riskResult.safetyFlags.filter(
+        (f) => !existingFlagsC.some((ef: { flag: string }) => ef.flag === f.flag)
+      ),
+    ];
+
+    const updatedC = await TriageSession.findByIdAndUpdate(
+      sessionId,
+      {
+        riskScore:   riskResult.riskScore,
+        riskLevel:   riskResult.riskLevel as import("@/types").RiskLevel,
+        safetyFlags: mergedFlagsC,
+        status:      "pending_review",
+        aiReport: {
+          summary:            reportResult.summary,
+          possibleConditions: reportResult.possibleConditions,
+          recommendations:    reportResult.recommendations,
+          redFlags:           reportResult.redFlags,
+          urgency:            reportResult.urgency,
+          followUpTimeframe:  reportResult.followUpTimeframe,
+          disclaimer:         reportResult.disclaimer,
+        },
+      },
+      { new: true }
+    );
+    if (!updatedC) {
+      yield { type: "error", message: "Failed to save assessment. Please try again." };
+      return;
+    }
+    const cs = updatedC.toJSON() as import("@/types").ITriageSession;
+    yield {
+      type:    "complete",
+      session: {
+        _id:            cs._id,
+        status:         cs.status,
+        riskLevel:      cs.riskLevel,
+        riskScore:      cs.riskScore,
+        chiefComplaint: cs.chiefComplaint,
+        createdAt:      cs.createdAt,
+        safetyFlags:    cs.safetyFlags,
+        aiReport:       cs.aiReport
+          ? {
+              summary:           cs.aiReport.summary,
+              recommendations:   cs.aiReport.recommendations,
+              redFlags:          cs.aiReport.redFlags,
+              followUpTimeframe: cs.aiReport.followUpTimeframe,
+            }
+          : undefined,
+      },
+    };
+    return;
+  }
+
+  // Stream the next question token by token
+  let lastMeta:        StreamingQuestionEvent["meta"] | undefined;
+  let streamedQuestion = "";   // accumulate tokens so we can persist the full text
+
+  for await (const event of streamNextQuestion({
+    chiefComplaint:    session.chiefComplaint,
+    answeredQuestions: updatedQuestions,
+    patientAge,
+    patientGender:     account.sex,
+    extractedSymptoms: session.extractedSymptoms,
+  })) {
+    if (event.type === "token" && event.text) streamedQuestion += event.text;
+    if (event.type === "meta")               lastMeta = event.meta;
+    yield event;
+  }
+
+  // Persist the next question to DB after streaming is complete
+  if (lastMeta) {
+    // Unify the completion threshold: >= 8 answered questions in both paths
+    const isNowLastQuestion = lastMeta.isLastQuestion || updatedQuestions.length >= 8;
+
+    if (isNowLastQuestion) {
+      yield { type: "progress", step: 1, message: "Reviewing your responses…" };
+      yield { type: "progress", step: 2, message: "Calculating risk assessment…" };
+      const completedSession = await completeTriageSession(
+        sessionId, updatedQuestions, account, session.chiefComplaint
+      );
+      yield { type: "progress", step: 3, message: "Generating your clinical report…" };
+      yield {
+        type:    "complete",
+        session: completedSession
+          ? {
+              _id:            completedSession._id,
+              status:         completedSession.status,
+              riskLevel:      completedSession.riskLevel,
+              riskScore:      completedSession.riskScore,
+              chiefComplaint: completedSession.chiefComplaint,
+              createdAt:      completedSession.createdAt,
+              safetyFlags:    completedSession.safetyFlags,
+              aiReport:       completedSession.aiReport
+                ? {
+                    summary:           completedSession.aiReport.summary,
+                    recommendations:   completedSession.aiReport.recommendations,
+                    redFlags:          completedSession.aiReport.redFlags,
+                    followUpTimeframe: completedSession.aiReport.followUpTimeframe,
+                  }
+                : undefined,
+            }
+          : undefined,
+      };
+    } else {
+      // Persist the question text that was streamed — never store an empty string
+      await TriageSession.findByIdAndUpdate(sessionId, {
+        $push: {
+          qaFlow: {
+            questionId: lastMeta.questionId,
+            question:   streamedQuestion.trim() || lastMeta.questionId,
+            answer:     "",
+            answeredAt: new Date(),
+          },
+        },
+      });
+    }
+  }
 }
 
 export async function getTriageSession(

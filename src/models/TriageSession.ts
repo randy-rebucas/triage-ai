@@ -74,7 +74,7 @@ export interface IClinicalReview {
 }
 
 export interface ITriageSessionDocument extends Document {
-  tenantId:  Types.ObjectId;
+  tenantId:  string;
   patientId: Types.ObjectId;
   extractedSymptoms?: IExtractedSymptomsDocument;
 
@@ -118,9 +118,9 @@ export interface ITriageSessionDocument extends Document {
 const triageSessionSchema = new Schema<ITriageSessionDocument>(
   {
     tenantId: {
-      type: Schema.Types.ObjectId,
-      ref: "Tenant",
+      type:     String,
       required: true,
+      index:    true,
     },
     patientId: {
       type: Schema.Types.ObjectId,

@@ -251,18 +251,35 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
   const [safetyFlags, setSafetyFlags]       = useState<ISafetyFlag[]>([]);
   const [error, setError]                   = useState<string | null>(null);
 
-  const messagesEndRef  = useRef<HTMLDivElement>(null);
-  const textareaRef     = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef   = useRef<HTMLDivElement>(null);
+  const textareaRef      = useRef<HTMLTextAreaElement>(null);
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const focusTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the previous render was mid-load so we can detect the
+  // isLoading true→false transition and auto-focus the correct input.
+  const wasLoadingRef    = useRef(false);
 
   // Clean up pending timers on unmount
   useEffect(() => {
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-      if (focusTimerRef.current)    clearTimeout(focusTimerRef.current);
     };
   }, []);
+
+  // Auto-focus the active input control once the AI finishes responding.
+  // We detect the isLoading true → false transition so focus only fires
+  // after the textarea/buttons are re-enabled (not while they're disabled).
+  useEffect(() => {
+    if (wasLoadingRef.current && !isLoading && step === "questions") {
+      if (inputMode === "text") {
+        // Tiny delay lets React flush the disabled→enabled prop before focus
+        const t = setTimeout(() => textareaRef.current?.focus(), 60);
+        wasLoadingRef.current = false;
+        return () => clearTimeout(t);
+      }
+      // yes_no / slider — no keyboard focus needed; user taps visually
+    }
+    wasLoadingRef.current = isLoading;
+  }, [isLoading, step, inputMode]);
 
   // Auto-scroll on new messages or while AI is typing
   useEffect(() => {
@@ -318,10 +335,21 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
       if (data.data.safetyFlags?.length > 0) setSafetyFlags(data.data.safetyFlags);
 
       addMessage("assistant", data.data.firstQuestion);
-      // Prefer AI-provided inputType; fall back to heuristic detection
-      setInputMode(data.data.inputType ?? detectInputMode(data.data.firstQuestion));
-      setStep("questions");
-      setProgress(10);
+
+      if (data.data.isEmergency) {
+        // Emergency fast-path — session already completed, jump straight to done
+        setStep("processing");
+        completeTimerRef.current = setTimeout(() => onComplete(data.data.session as ITriageSession), 3000);
+      } else {
+        const firstInputMode = data.data.inputType ?? detectInputMode(data.data.firstQuestion);
+        setInputMode(firstInputMode);
+        setStep("questions");
+        setProgress(10);
+        // Focus the textarea for the first question (text mode only)
+        if (firstInputMode === "text") {
+          setTimeout(() => textareaRef.current?.focus(), 60);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -329,7 +357,7 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
     }
   };
 
-  // ── Submit an answer (text, slider, or yes/no) ─────────────────
+  // ── Submit an answer — streaming via SSE ──────────────────────
   const handleSubmitAnswer = useCallback(async (overrideAnswer?: string) => {
     let answer = overrideAnswer;
 
@@ -349,28 +377,128 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
     setIsLoading(true);
 
     try {
-      const res  = await fetch(`/api/triage/${sessionId}/answer`, {
+      const res = await fetch(`/api/triage/${sessionId}/stream-answer`, {
         method:  "POST",
-        headers: getHeaders(),
+        headers: { ...getHeaders(), Accept: "text/event-stream" },
         body:    JSON.stringify({ answer, questionId: currentQuestionId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to submit answer");
 
-      if (data.data.isComplete) {
-        setStep("processing");
-        addMessage(
-          "assistant",
-          "Thank you for sharing that information. I've completed your pre-consultation assessment. Your doctor will review your responses and the AI-generated summary shortly.\n\nPlease do not make any medical decisions based on this assessment alone."
-        );
-        completeTimerRef.current = setTimeout(() => onComplete(data.data.session), 2000);
-      } else {
-        setCurrentQuestionId(data.data.nextQuestionId);
-        setProgress(data.data.progress);
-        addMessage("assistant", data.data.nextQuestion);
-        setInputMode(data.data.inputType ?? detectInputMode(data.data.nextQuestion));
-        focusTimerRef.current = setTimeout(() => textareaRef.current?.focus(), 80);
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Failed to submit answer");
       }
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let streamingMsgAdded = false;
+      let streamingContent  = "";
+
+      const processLine = (line: string) => {
+        if (!line.startsWith("data: ")) return;
+        const json = line.slice(6).trim();
+        if (!json) return;
+
+        let event: Record<string, unknown>;
+        try { event = JSON.parse(json); } catch { return; }
+
+        const type = event.type as string;
+
+        if (type === "token" && typeof event.text === "string") {
+          streamingContent += event.text;
+          if (!streamingMsgAdded) {
+            // Add placeholder message; subsequent tokens patch it in-place
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: streamingContent, timestamp: new Date() },
+            ]);
+            streamingMsgAdded = true;
+          } else {
+            // Patch the last message content
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last    = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                updated[updated.length - 1] = { ...last, content: streamingContent };
+              }
+              return updated;
+            });
+          }
+        }
+
+        if (type === "meta") {
+          // meta payload is nested: { type: "meta", meta: { questionId, inputType, progress, ... } }
+          const meta       = (event.meta ?? event) as Record<string, unknown>;
+          const questionId = meta.questionId as string | undefined;
+          const inputType  = meta.inputType  as InputMode | undefined;
+          const prog       = meta.progress   as number   | undefined;
+          if (questionId) setCurrentQuestionId(questionId);
+          if (prog != null) setProgress(prog);
+          if (inputType) {
+            setInputMode(inputType);
+          } else if (streamingContent) {
+            setInputMode(detectInputMode(streamingContent));
+          }
+          // Focus is handled by the wasLoadingRef useEffect once isLoading → false
+        }
+
+        if (type === "progress") {
+          const msg = (event.message as string) || "Processing…";
+          // Replace last assistant message with the current step label,
+          // or add a new one if this is the first progress event
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last    = updated[updated.length - 1];
+            if (last?.role === "assistant" && streamingMsgAdded) {
+              updated[updated.length - 1] = { ...last, content: `⏳ ${msg}` };
+            } else {
+              updated.push({ role: "assistant", content: `⏳ ${msg}`, timestamp: new Date() });
+              streamingMsgAdded = true;
+            }
+            return updated;
+          });
+        }
+
+        if (type === "complete") {
+          setStep("processing");
+          const hasSession = Boolean(event.session);
+          const finalMsg = hasSession
+            ? "✅ Your assessment is complete. A clinician will review your responses and the AI-generated summary shortly.\n\nPlease do not make any medical decisions based on this assessment alone."
+            : "⚠️ Your responses were saved but the report could not be generated right now. Please contact the clinic if you don't receive a follow-up.";
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last    = updated[updated.length - 1];
+            if (last?.role === "assistant" && streamingMsgAdded) {
+              updated[updated.length - 1] = { ...last, content: finalMsg };
+            } else {
+              updated.push({ role: "assistant", content: finalMsg, timestamp: new Date() });
+            }
+            return updated;
+          });
+          if (hasSession) {
+            completeTimerRef.current = setTimeout(() => {
+              onComplete(event.session as ITriageSession);
+            }, 2000);
+          }
+        }
+
+        if (type === "error") {
+          throw new Error((event.message as string) || "Stream error");
+        }
+      };
+
+      // Read the SSE stream line-by-line
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) processLine(line);
+      }
+      // Flush remaining buffer
+      for (const line of buf.split("\n")) processLine(line);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -396,7 +524,7 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
   const canSendText       = input.trim().length > 0;
 
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-200px)]">
+    <div className="flex flex-col flex-1 min-h-0">
 
       {/* ── Emergency alert ─────────────────────────────────────── */}
       {hasEmergencyFlags && (
@@ -427,7 +555,7 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
       >
         {messages.map((msg, idx) => (
           <div
-            key={idx}
+            key={`${msg.role}-${msg.timestamp.getTime()}-${idx}`}
             className={`flex ${msg.role === "patient" ? "justify-end" : "justify-start"} animate-fade-in`}
           >
             {msg.role === "assistant" && (
@@ -612,23 +740,10 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
         </div>
       )}
 
-      {/* ── Processing state ────────────────────────────────────── */}
-      {step === "processing" && (
-        <div className="flex-shrink-0 flex items-center justify-center gap-3 py-4">
-          <LoadingSpinner size="sm" color="blue" />
-          <span className="text-sm text-gray-500">Generating your assessment report…</span>
-        </div>
-      )}
-
       {/* ── Legal disclaimer ────────────────────────────────────── */}
-      <div className="mt-3 flex-shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-center">
-        <p className="text-xs font-semibold text-amber-800">
-          ⚠ This is NOT a medical diagnosis. A licensed doctor must validate all results.
-        </p>
-        <p className="mt-1 text-xs text-amber-700">
-          This assessment is for informational purposes only and does not replace a licensed physician.
-        </p>
-      </div>
+      <p className="mt-3 flex-shrink-0 text-center text-[11px] text-gray-400">
+        ⚠ Not a medical diagnosis — a licensed clinician will review all results.
+      </p>
     </div>
   );
 }

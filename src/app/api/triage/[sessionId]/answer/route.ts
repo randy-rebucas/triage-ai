@@ -47,7 +47,16 @@ async function handler(
     }
 
     const tenantId = await getTenantId();
-    const result   = await submitAnswer(sessionId, patient.patientId, parsed.data, tenantId);
+    if (!tenantId) {
+      console.error(`[POST /api/triage/${sessionId}/answer] tenantId resolved to null`);
+      return errorResponse(
+        "Clinic configuration not found. Please refresh the page and try again.",
+        503,
+        "TENANT_NOT_FOUND"
+      );
+    }
+
+    const result = await submitAnswer(sessionId, patient.patientId, parsed.data, tenantId);
 
     if (result.isComplete && result.session) {
       const s = result.session;

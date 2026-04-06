@@ -32,7 +32,7 @@ const styles: Record<AlertVariant, { container: string; icon: string; title: str
     title: "text-red-800",
   },
   emergency: {
-    container: "bg-red-100 border-red-400 text-red-900 animate-pulse-slow",
+    container: "bg-red-100 border-red-400 text-red-900 motion-safe:animate-pulse-slow",
     icon: "text-red-600",
     title: "text-red-900 font-bold",
   },

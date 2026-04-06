@@ -1,4 +1,12 @@
-import openaiClient, { AI_MODEL, AI_MAX_TOKENS, AI_TEMPERATURE } from "./client";
+import openaiClient, { AI_MODEL, AI_FAST_MODEL, AI_MAX_TOKENS, AI_TEMPERATURE } from "./client";
+import { withRetry } from "./retry";
+import {
+  parseAndValidate,
+  SymptomExtractionResultSchema,
+  NextQuestionResultSchema,
+  RiskScoringResultSchema,
+  ReportResultSchema,
+} from "./validation";
 import {
   buildSymptomExtractionSystemPrompt,
   buildSymptomExtractionUserPrompt,
@@ -8,6 +16,8 @@ import {
 import {
   buildQuestioningSystemPrompt,
   buildQuestioningUserPrompt,
+  buildStreamingQuestioningSystemPrompt,
+  buildStreamingQuestioningUserPrompt,
   type QuestioningContext,
   type NextQuestionResult,
 } from "./prompts/questioning";
@@ -32,26 +42,18 @@ import {
 //   Stage 1 — generateNextQuestion : adaptive follow-up questioning
 //   Stage 2 — calculateRiskScore   : numeric risk + safety flags
 //   Stage 3 — generateTriageReport : full structured pre-consultation report
+//
+// All stages:
+//   • Retry up to 3× with exponential backoff on transient errors
+//   • Validate output with Zod schemas (parseAndValidate)
+//   • Log token usage for cost visibility
 // ─────────────────────────────────────────────────────────────────
 
-// ── Shared JSON parser ────────────────────────────────────────────
-
-/**
- * Parse JSON from an AI response, handling markdown code fences
- * that some models wrap around their JSON output.
- */
-function parseAIJson<T>(content: string): T {
-  const cleaned = content
-    .trim()
-    .replace(/^```(?:json)?\n?/, "")
-    .replace(/\n?```$/, "")
-    .trim();
-
-  try {
-    return JSON.parse(cleaned) as T;
-  } catch {
-    throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 300)}`);
-  }
+function logTokens(stage: string, usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null) {
+  if (!usage) return;
+  console.info(
+    `[AI:${stage}] tokens — prompt: ${usage.prompt_tokens}, completion: ${usage.completion_tokens}, total: ${usage.total_tokens}`
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -68,31 +70,43 @@ function parseAIJson<T>(content: string): T {
 export async function extractSymptoms(
   context: SymptomExtractionContext
 ): Promise<SymptomExtractionResult> {
-  const response = await openaiClient.chat.completions.create({
-    model:           AI_MODEL,
-    temperature:     0.1, // Low temperature — extraction should be deterministic
-    max_tokens:      512,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: buildSymptomExtractionSystemPrompt() },
-      { role: "user",   content: buildSymptomExtractionUserPrompt(context) },
-    ],
-  });
+  return withRetry(
+    async () => {
+      const response = await openaiClient.chat.completions.create({
+        model:           AI_FAST_MODEL,   // fast model — simple NLP extraction
+        temperature:     0.1,
+        max_tokens:      400,             // extraction needs < 400 tokens
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildSymptomExtractionSystemPrompt() },
+          { role: "user",   content: buildSymptomExtractionUserPrompt(context) },
+        ],
+      });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI symptom extraction module");
+      logTokens("extractSymptoms", response.usage);
 
-  const result = parseAIJson<SymptomExtractionResult>(content);
+      const content = response.choices[0]?.message?.content;
+      if (!content) throw new Error("[AI:extractSymptoms] Empty response from model");
 
-  // Guarantee required arrays are always present
-  result.symptoms           = result.symptoms           ?? [];
-  result.redFlagLanguage    = result.redFlagLanguage    ?? [];
-  result.coveredDimensions  = result.coveredDimensions  ?? [];
-  result.missingDimensions  = result.missingDimensions  ?? [];
-  result.bodySystem         = result.bodySystem         ?? "general";
-  result.primarySymptom     = result.primarySymptom     || context.chiefComplaint.slice(0, 60);
+      const result = parseAndValidate(
+        SymptomExtractionResultSchema,
+        content,
+        "extractSymptoms",
+      );
 
-  return result;
+      // Fall back to the raw complaint text if primarySymptom is missing
+      if (!result.primarySymptom) {
+        result.primarySymptom = context.chiefComplaint.slice(0, 80);
+      }
+
+      return result as SymptomExtractionResult;
+    },
+    {
+      maxAttempts: 3,
+      onRetry: (n, err) =>
+        console.warn(`[AI:extractSymptoms] retry ${n} — ${err.message}`),
+    }
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -101,45 +115,177 @@ export async function extractSymptoms(
 
 /**
  * Generate the next adaptive follow-up question.
- * Uses extraction context (when available) to prioritise uncovered
- * clinical dimensions. Returns `inputType` so the UI renders the
- * appropriate input control without relying on heuristics.
+ * Returns `inputType` so the UI renders the correct control.
  */
 export async function generateNextQuestion(
   context: QuestioningContext
 ): Promise<NextQuestionResult> {
-  const response = await openaiClient.chat.completions.create({
-    model:           AI_MODEL,
-    temperature:     AI_TEMPERATURE,
-    max_tokens:      256,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: buildQuestioningSystemPrompt() },
-      { role: "user",   content: buildQuestioningUserPrompt(context) },
-    ],
-  });
+  return withRetry(
+    async () => {
+      const response = await openaiClient.chat.completions.create({
+        model:           AI_FAST_MODEL,   // fast model — question generation is quick
+        temperature:     AI_TEMPERATURE,
+        max_tokens:      200,             // one question never needs more than 200 tokens
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildQuestioningSystemPrompt() },
+          { role: "user",   content: buildQuestioningUserPrompt(context) },
+        ],
+      });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI questioning module");
+      logTokens("generateNextQuestion", response.usage);
 
-  const result = parseAIJson<NextQuestionResult>(content);
+      const content = response.choices[0]?.message?.content;
+      if (!content) throw new Error("[AI:generateNextQuestion] Empty response from model");
 
-  if (!result.questionId || !result.question) {
-    throw new Error("AI questioning response missing required fields (questionId, question)");
+      const result = parseAndValidate(
+        NextQuestionResultSchema,
+        content,
+        "generateNextQuestion",
+      );
+
+      // Force last-question flag at hard limit
+      if (context.answeredQuestions.length >= 7) {
+        result.isLastQuestion = true;
+        result.progress       = 100;
+      }
+
+      return result as NextQuestionResult;
+    },
+    {
+      maxAttempts: 3,
+      onRetry: (n, err) =>
+        console.warn(`[AI:generateNextQuestion] retry ${n} — ${err.message}`),
+    }
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage 1 (streaming variant) — Real-time question delivery via SSE
+// ─────────────────────────────────────────────────────────────────
+
+export interface StreamingQuestionEvent {
+  type:     "token" | "meta" | "complete" | "progress";
+  text?:    string;
+  meta?:    NextQuestionResult;
+  message?: string;   // used by "progress" events
+  step?:    number;   // used by "progress" events (1-based)
+}
+
+/**
+ * Stream the next question as it's generated by the AI.
+ *
+ * The model outputs in a delimited format:
+ *   <question text>
+ *   ---
+ *   {"questionId":"q_2","inputType":"text", ...}
+ *
+ * The returned async generator emits:
+ *   • { type: "token", text: "..." } — one token at a time (question text only)
+ *   • { type: "meta",  meta: {...}  } — after the delimiter (parsed metadata)
+ *
+ * Callers pipe these events to an SSE response or a ReadableStream.
+ */
+export async function* streamNextQuestion(
+  context: QuestioningContext
+): AsyncGenerator<StreamingQuestionEvent> {
+  const stream = await withRetry(
+    () => openaiClient.chat.completions.create({
+      model:       AI_FAST_MODEL,
+      temperature: AI_TEMPERATURE,
+      max_tokens:  250,             // streaming question text never needs more
+      stream:      true,
+      messages: [
+        { role: "system", content: buildStreamingQuestioningSystemPrompt() },
+        { role: "user",   content: buildStreamingQuestioningUserPrompt(context) },
+      ],
+    }),
+    { maxAttempts: 3, onRetry: (n, err) => console.warn(`[AI:streamNextQuestion] retry ${n} — ${err.message}`) },
+  );
+
+  let buffer       = "";
+  let totalEmitted = 0;     // chars of buffer already sent as token events
+  let metaMode     = false; // true once the \n---\n delimiter has been consumed
+  const DELIMITER  = "\n---\n";
+  // Keep the last (DELIMITER.length - 1) chars un-emitted as a lookahead so a
+  // delimiter that straddles two chunks is never accidentally sent to the client.
+  const LOOKAHEAD = DELIMITER.length - 1;
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content ?? "";
+    if (!delta) continue;
+    buffer += delta;
+
+    if (!metaMode) {
+      const delimIdx = buffer.indexOf(DELIMITER);
+      if (delimIdx !== -1) {
+        // Emit the un-sent question text that precedes the delimiter
+        if (delimIdx > totalEmitted) {
+          yield { type: "token", text: buffer.slice(totalEmitted, delimIdx) };
+        }
+        metaMode     = true;
+        totalEmitted = 0;
+        buffer       = buffer.slice(delimIdx + DELIMITER.length);
+      } else {
+        // Emit everything except the last LOOKAHEAD chars (they may be the
+        // start of the delimiter and must not be flushed yet).
+        const safeUpTo = Math.max(totalEmitted, buffer.length - LOOKAHEAD);
+        if (safeUpTo > totalEmitted) {
+          yield { type: "token", text: buffer.slice(totalEmitted, safeUpTo) };
+          totalEmitted = safeUpTo;
+        }
+      }
+    }
+    // metaMode: silently accumulate the JSON metadata
   }
 
-  // Guarantee inputType is always a valid value
-  if (!["text", "yes_no", "slider"].includes(result.inputType)) {
-    result.inputType = "text";
+  // Stream ended — flush any remaining question text if the delimiter was
+  // never found (fallback: try to split on the first `\n{` boundary).
+  if (!metaMode) {
+    const jsonStart = buffer.indexOf("\n{");
+    if (jsonStart !== -1 && jsonStart >= totalEmitted) {
+      yield { type: "token", text: buffer.slice(totalEmitted, jsonStart) };
+      buffer = buffer.slice(jsonStart + 1);   // leave only the JSON
+    } else {
+      if (buffer.length > totalEmitted) {
+        yield { type: "token", text: buffer.slice(totalEmitted) };
+      }
+      buffer = "";
+    }
   }
 
-  // Force last-question flag once we hit the maximum
-  if (context.answeredQuestions.length >= 7) {
-    result.isLastQuestion = true;
-    result.progress       = 100;
-  }
+  // Parse the metadata JSON that accumulated after the delimiter
+  const metaJson = buffer.trim();
+  if (metaJson) {
+    try {
+      const parsed = parseAndValidate(
+        NextQuestionResultSchema,
+        metaJson.startsWith("{") ? metaJson : `{${metaJson}}`,
+        "streamNextQuestion:meta",
+      );
 
-  return result;
+      if (context.answeredQuestions.length >= 7) {
+        parsed.isLastQuestion = true;
+        parsed.progress       = 100;
+      }
+
+      yield { type: "meta", meta: parsed as NextQuestionResult };
+    } catch (err) {
+      console.error("[AI:streamNextQuestion] Failed to parse metadata:", err);
+      // Emit a safe fallback so the client isn't left hanging
+      yield {
+        type: "meta",
+        meta: {
+          questionId:     `q_${context.answeredQuestions.length + 2}`,
+          question:       "",
+          inputType:      "text",
+          category:       "history",
+          isLastQuestion: context.answeredQuestions.length >= 7,
+          progress:       Math.min((context.answeredQuestions.length + 2) * 12, 100),
+        },
+      };
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -154,41 +300,53 @@ export async function generateNextQuestion(
 export async function calculateRiskScore(
   context: RiskScoringContext
 ): Promise<RiskScoringResult> {
-  const response = await openaiClient.chat.completions.create({
-    model:           AI_MODEL,
-    temperature:     0.1, // Low temperature for consistent, reproducible scoring
-    max_tokens:      512,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: buildRiskScoringSystemPrompt() },
-      { role: "user",   content: buildRiskScoringUserPrompt(context) },
-    ],
-  });
+  return withRetry(
+    async () => {
+      const response = await openaiClient.chat.completions.create({
+        model:           AI_MODEL,
+        temperature:     0.1,
+        max_tokens:      500,             // risk output is compact JSON
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildRiskScoringSystemPrompt() },
+          { role: "user",   content: buildRiskScoringUserPrompt(context) },
+        ],
+      });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI risk scoring module");
+      logTokens("calculateRiskScore", response.usage);
 
-  const result = parseAIJson<RiskScoringResult>(content);
+      const content = response.choices[0]?.message?.content;
+      if (!content) throw new Error("[AI:calculateRiskScore] Empty response from model");
 
-  // Clamp score to valid range
-  result.riskScore = Math.max(0, Math.min(100, Math.round(result.riskScore)));
+      const result = parseAndValidate(
+        RiskScoringResultSchema,
+        content,
+        "calculateRiskScore",
+      );
 
-  // Enforce score-to-level consistency regardless of AI output
-  if      (result.riskScore <= 30) result.riskLevel = "low";
-  else if (result.riskScore <= 60) result.riskLevel = "medium";
-  else if (result.riskScore <= 80) result.riskLevel = "high";
-  else                             result.riskLevel = "critical";
+      // Clamp score regardless of AI output
+      result.riskScore = Math.max(0, Math.min(100, Math.round(result.riskScore)));
 
-  // Guarantee arrays + fields are present
-  result.safetyFlags           = result.safetyFlags           ?? [];
-  result.requiresEmergencyReferral = result.requiresEmergencyReferral ?? false;
-  result.reasoning             = result.reasoning             ?? "";
-  result.recommendedTimeframe  = result.recommendedTimeframe  ?? deriveTimeframe(result.riskLevel);
+      // Enforce score-level consistency
+      if      (result.riskScore <= 30) result.riskLevel = "low";
+      else if (result.riskScore <= 60) result.riskLevel = "medium";
+      else if (result.riskScore <= 80) result.riskLevel = "high";
+      else                             result.riskLevel = "critical";
 
-  return result;
+      if (!result.recommendedTimeframe) {
+        result.recommendedTimeframe = deriveTimeframe(result.riskLevel);
+      }
+
+      return result as RiskScoringResult;
+    },
+    {
+      maxAttempts: 3,
+      onRetry: (n, err) =>
+        console.warn(`[AI:calculateRiskScore] retry ${n} — ${err.message}`),
+    }
+  );
 }
 
-/** Fallback timeframe derivation when AI omits the field */
 function deriveTimeframe(level: RiskScoringResult["riskLevel"]): string {
   const map: Record<typeof level, string> = {
     low:      "routine appointment within 1–2 weeks",
@@ -208,79 +366,91 @@ const MANDATORY_DISCLAIMER =
 
 /**
  * Generate the complete structured pre-consultation report.
- * Passes extraction and risk reasoning context to produce a richer,
- * more accurate report without re-inferring what is already known.
  */
 export async function generateTriageReport(
   context: ReportContext
 ): Promise<ReportResult> {
-  const response = await openaiClient.chat.completions.create({
-    model:           AI_MODEL,
-    temperature:     AI_TEMPERATURE,
-    max_tokens:      AI_MAX_TOKENS,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: buildReportSystemPrompt() },
-      { role: "user",   content: buildReportUserPrompt(context) },
-    ],
-  });
+  return withRetry(
+    async () => {
+      const response = await openaiClient.chat.completions.create({
+        model:           AI_MODEL,
+        temperature:     AI_TEMPERATURE,
+        max_tokens:      Math.min(AI_MAX_TOKENS, 1200), // cap report at 1200; 2048 is wasteful
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildReportSystemPrompt() },
+          { role: "user",   content: buildReportUserPrompt(context) },
+        ],
+      });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI report generation module");
+      logTokens("generateTriageReport", response.usage);
 
-  const result = parseAIJson<ReportResult>(content);
+      const content = response.choices[0]?.message?.content;
+      if (!content) throw new Error("[AI:generateTriageReport] Empty response from model");
 
-  // Safety net — disclaimer must always be present
-  if (!result.disclaimer) {
-    result.disclaimer = MANDATORY_DISCLAIMER;
-  }
+      const result = parseAndValidate(
+        ReportResultSchema,
+        content,
+        "generateTriageReport",
+      );
 
-  // Guarantee arrays are always present
-  result.recommendations  = result.recommendations  ?? [];
-  result.redFlags         = result.redFlags         ?? [];
-  result.followUpTimeframe = result.followUpTimeframe ?? "";
+      if (!result.disclaimer) {
+        result.disclaimer = MANDATORY_DISCLAIMER;
+      }
 
-  // Cap conditions at 5
-  if (result.possibleConditions?.length > 5) {
-    result.possibleConditions = result.possibleConditions.slice(0, 5);
-  }
+      if (result.possibleConditions.length > 5) {
+        result.possibleConditions = result.possibleConditions.slice(0, 5);
+      }
 
-  return result;
+      return result as ReportResult;
+    },
+    {
+      maxAttempts: 3,
+      onRetry: (n, err) =>
+        console.warn(`[AI:generateTriageReport] retry ${n} — ${err.message}`),
+    }
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Synchronous emergency keyword check
+// Synchronous emergency keyword scan
 //
 // Runs BEFORE any AI call to immediately flag life-threatening
-// phrases in the chief complaint. This is a safety net — the full
-// extraction stage will also catch red flags via AI.
+// phrases in the chief complaint. Safety net — the full extraction
+// stage also catches red flags via AI.
 // ─────────────────────────────────────────────────────────────────
 
 const EMERGENCY_PATTERNS: { pattern: RegExp; flag: string }[] = [
-  { pattern: /chest pain/i,
+  { pattern: /chest\s+pain/i,
     flag: "Chest pain reported — possible cardiac event" },
-  { pattern: /can't breathe|cannot breathe|difficulty breathing|shortness of breath/i,
+  { pattern: /can(?:'t| not)\s+breathe|cannot\s+breathe|difficulty\s+breathing|shortness\s+of\s+breath/i,
     flag: "Breathing difficulty reported — possible respiratory emergency" },
-  { pattern: /stroke|face drooping|arm weakness|speech difficulty|slurred speech/i,
+  { pattern: /stroke|face\s+droop|arm\s+weakness|speech\s+difficult|slurred\s+speech/i,
     flag: "Possible stroke symptoms — FAST protocol applies" },
-  { pattern: /unconscious|passed out|fainted|loss of consciousness/i,
+  { pattern: /unconscious|passed?\s+out|faint(?:ed|ing)|loss\s+of\s+consciousness/i,
     flag: "Loss of consciousness reported" },
-  { pattern: /severe bleeding|uncontrolled bleeding|blood loss/i,
+  { pattern: /severe\s+bleeding|uncontrolled\s+bleeding|blood\s+loss/i,
     flag: "Severe bleeding reported" },
-  { pattern: /allergic reaction|anaphylaxis|throat closing|throat tightening/i,
+  { pattern: /allergic\s+reaction|anaphylax|throat\s+clos|throat\s+tighten/i,
     flag: "Possible anaphylaxis — airway compromise risk" },
-  { pattern: /suicidal|want to die|kill myself|end my life/i,
+  { pattern: /suicid|want\s+to\s+die|kill\s+myself|end\s+my\s+life/i,
     flag: "Mental health crisis — immediate referral required" },
-  { pattern: /overdose|took too many pills/i,
+  { pattern: /overdose|took\s+too\s+many\s+pills/i,
     flag: "Possible medication overdose" },
-  { pattern: /severe abdominal pain|worst pain.*of my life|10 out of 10/i,
+  { pattern: /severe\s+abdominal\s+pain|worst\s+(?:pain|headache)\s+of\s+my\s+life|10\s*(?:out\s*of\s*10|\/10)/i,
     flag: "Maximum severity pain reported" },
-  { pattern: /radiating.*arm|radiating.*jaw|pain.*left arm|pain.*shoulder/i,
+  { pattern: /radiating\s+(?:to\s+)?(?:arm|jaw|shoulder)|pain\s+(?:in|down)\s+(?:left\s+)?arm/i,
     flag: "Radiating chest/arm pain — possible cardiac involvement" },
+  { pattern: /not\s+breathing|stopped?\s+breathing|cardiac\s+arrest/i,
+    flag: "Respiratory or cardiac arrest reported" },
+  { pattern: /seizure|convuls/i,
+    flag: "Seizure activity reported" },
+  { pattern: /diabetic\s+emergency|blood\s+sugar|hypoglycemi/i,
+    flag: "Possible diabetic emergency" },
 ];
 
 /**
- * Fast synchronous keyword scan run before any AI call.
+ * Fast synchronous keyword scan before any AI call.
  * Returns detected flag descriptions for immediate safety escalation.
  */
 export function checkEmergencyKeywords(text: string): string[] {

@@ -5,6 +5,7 @@ import { getPatientTriageSessions } from "@/services/triageService";
 import { Card } from "@/components/ui/Card";
 import { RiskBadge, Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { formatSessionStatus, sessionStatusVariant } from "@/lib/formatters";
 import type { Metadata } from "next";
 import { format } from "date-fns";
 
@@ -57,8 +58,8 @@ export default async function PatientReportsPage({ params }: Props) {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <RiskBadge level={session.riskLevel} />
-                    <Badge variant={session.status === "reviewed" ? "success" : session.status === "pending_review" ? "info" : "default"}>
-                      {session.status === "reviewed" ? "Reviewed" : session.status === "pending_review" ? "Pending" : "Draft"}
+                    <Badge variant={sessionStatusVariant(session.status)}>
+                      {formatSessionStatus(session.status)}
                     </Badge>
                     <span className="text-gray-400">→</span>
                   </div>

@@ -133,6 +133,43 @@ Extract from the conversation — do not invent:
 ━━━ DISCLAIMER (mandatory, exact text) ━━━
 "This AI-generated report is for clinical reference only and does not constitute a medical diagnosis. A licensed physician must review and validate all findings before any clinical decision is made."
 
+━━━ FEW-SHOT EXAMPLE (abbreviated) ━━━
+Input: Chief complaint "chest tightness for 30 min", 58yo male, smoker, riskScore 88
+Output excerpt:
+{
+  "summary": {
+    "chiefComplaint": "Patient reports 30 minutes of chest tightness with associated shortness of breath.",
+    "duration": "30 minutes",
+    "severity": "8/10",
+    "onset": "sudden"
+  },
+  "possibleConditions": [
+    {
+      "name": "Acute Coronary Syndrome",
+      "icd10Code": "I24.9",
+      "confidence": 0.78,
+      "likelihood": "high",
+      "description": "Presentation may suggest acute coronary syndrome given sudden chest tightness with high severity and associated symptoms."
+    },
+    {
+      "name": "Unstable Angina",
+      "icd10Code": "I20.0",
+      "confidence": 0.61,
+      "likelihood": "moderate",
+      "description": "Could indicate unstable angina in the context of cardiovascular risk factors."
+    }
+  ],
+  "recommendations": [
+    "Call 911 or go to the nearest emergency room immediately — do not drive yourself.",
+    "Do not eat or drink anything while waiting for emergency services.",
+    "Follow any existing cardiac management plan as directed by your physician."
+  ],
+  "redFlags": ["Chest pain in a 58-year-old male smoker requires immediate ECG and troponin evaluation."],
+  "urgency": "critical",
+  "followUpTimeframe": "immediately — call 911 or go to the nearest emergency room",
+  "disclaimer": "This AI-generated report is for clinical reference only and does not constitute a medical diagnosis. A licensed physician must review and validate all findings before any clinical decision is made."
+}
+
 ━━━ OUTPUT FORMAT (strict JSON) ━━━
 {
   "summary": {

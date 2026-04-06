@@ -342,12 +342,14 @@ export default function OnboardPage() {
             </button>
           </div>
 
-          <p className="text-center text-sm text-gray-500">
-            Already have a clinic?{" "}
-            <a href={`/${form.subdomain}/login`} className="text-brand-600 font-medium hover:underline">
-              Sign in
-            </a>
-          </p>
+          {form.subdomain && (
+            <p className="text-center text-sm text-gray-500">
+              Already have a clinic?{" "}
+              <a href={`/${form.subdomain}/login`} className="text-brand-600 font-medium hover:underline">
+                Sign in
+              </a>
+            </p>
+          )}
         </form>
       </div>
     </div>

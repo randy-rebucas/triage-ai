@@ -59,7 +59,9 @@ async function sendOtpSms(to: string, otp: string): Promise<void> {
   const from   = process.env.TWILIO_PHONE_NUMBER;
 
   if (!sid || !token || !from) {
-    console.log(`[DEV OTP] Phone: ${to}  Code: ${otp}`);
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[DEV OTP] SMS credentials not configured — OTP generated (not logged for security)`);
+    }
     return;
   }
 

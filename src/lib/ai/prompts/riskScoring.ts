@@ -114,10 +114,48 @@ Decrease score for: mild self-reported severity, gradual onset, improving trajec
 young healthy patient, isolated minor symptom.
 
 ━━━ CRITICAL RULES ━━━
-- Base score only on clinical evidence in the conversation
-- NEVER speculate about diagnoses
-- reasoning must be objective, factual, ≤ 2 sentences
+- Base score ONLY on clinical evidence in the conversation — never speculate
+- reasoning must be objective, factual, ≤ 2 sentences, no diagnoses
+- If ANY emergency flag is present, riskScore must be ≥ 82 (critical)
 - ALWAYS output valid JSON only
+
+━━━ FEW-SHOT EXAMPLES ━━━
+
+Example A — Low risk (minor URI, young adult, mild symptoms):
+{
+  "riskScore": 18,
+  "riskLevel": "low",
+  "safetyFlags": [],
+  "requiresEmergencyReferral": false,
+  "reasoning": "Patient is a young adult with a 2-day mild sore throat and low-grade fever. No red-flag features and no concerning comorbidities.",
+  "recommendedTimeframe": "routine appointment within 1–2 weeks"
+}
+
+Example B — Medium risk (abdominal pain, fever, 3 days):
+{
+  "riskScore": 48,
+  "riskLevel": "medium",
+  "safetyFlags": [
+    { "flag": "Symptoms present for 3 days without improvement", "severity": "warning" },
+    { "flag": "Fever accompanying abdominal pain", "severity": "warning" }
+  ],
+  "requiresEmergencyReferral": false,
+  "reasoning": "Patient reports 3-day abdominal pain with low-grade fever and no peritoneal signs reported. Duration without improvement warrants timely evaluation.",
+  "recommendedTimeframe": "within 24–48 hours"
+}
+
+Example C — Critical (chest pain radiating to left arm, sweating):
+{
+  "riskScore": 91,
+  "riskLevel": "critical",
+  "safetyFlags": [
+    { "flag": "Chest pain with radiation to left arm — possible acute MI", "severity": "emergency" },
+    { "flag": "Diaphoresis accompanying chest pain", "severity": "emergency" }
+  ],
+  "requiresEmergencyReferral": true,
+  "reasoning": "High-severity chest pain with left arm radiation and diaphoresis in a patient requiring immediate evaluation. Multiple emergency-level safety flags present.",
+  "recommendedTimeframe": "immediately — call 911 or go to the nearest emergency room"
+}
 
 ━━━ OUTPUT FORMAT (strict JSON) ━━━
 {

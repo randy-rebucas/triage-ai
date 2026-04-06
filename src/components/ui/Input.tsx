@@ -1,4 +1,4 @@
-import { InputHTMLAttributes, TextareaHTMLAttributes, forwardRef } from "react";
+import { InputHTMLAttributes, TextareaHTMLAttributes, forwardRef, useId } from "react";
 import { clsx } from "clsx";
 
 // ─────────────────────────────────────────────────────────────────
@@ -29,7 +29,8 @@ const errorStyles =
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, leftAddon, className, id, ...props }, ref) => {
-    const inputId = id || label?.toLowerCase().replace(/\s+/g, "-");
+    const generatedId = useId();
+    const inputId     = id || generatedId;
 
     return (
       <div className="space-y-1">
@@ -79,7 +80,8 @@ Input.displayName = "Input";
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, hint, className, id, rows = 4, ...props }, ref) => {
-    const inputId = id || label?.toLowerCase().replace(/\s+/g, "-");
+    const generatedId = useId();
+    const inputId     = id || generatedId;
 
     return (
       <div className="space-y-1">

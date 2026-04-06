@@ -49,6 +49,8 @@ export type {
 export {
   buildQuestioningSystemPrompt,
   buildQuestioningUserPrompt,
+  buildStreamingQuestioningSystemPrompt,
+  buildStreamingQuestioningUserPrompt,
 } from "./questioning";
 
 export type {

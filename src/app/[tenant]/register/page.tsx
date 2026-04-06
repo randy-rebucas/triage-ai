@@ -77,6 +77,7 @@ export default function RegisterPage() {
       if (!res.ok) throw new Error(data.error || "Registration failed");
 
       // Public registration does not issue a session — redirect to login
+      setIsLoading(false);
       router.push(`/${tenant}/login`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");

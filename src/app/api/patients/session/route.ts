@@ -11,7 +11,8 @@ import { patientGet, patientDelete } from "@/lib/api/patientApiClient";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const include = req.nextUrl.searchParams.get("include");
-  const path    = `/api/patients/session${include ? `?include=${include}` : ""}`;
+  const qs      = include ? `?${new URLSearchParams({ include }).toString()}` : "";
+  const path    = `/api/patients/session${qs}`;
   return patientGet(req, path, { forwardAuth: true });
 }
 

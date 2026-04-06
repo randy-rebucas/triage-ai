@@ -13,31 +13,55 @@
 
   html {
     scroll-behavior: smooth;
+    overflow-y: scroll;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
-    @apply text-gray-900;
+    @apply text-gray-900 bg-gray-50;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
-  /* Focus styles for accessibility */
+  /* Accessible focus ring — visible only on keyboard navigation */
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-blue-500;
   }
 }
 
+/* ── Print — show only #report-print-area ───────────────────────── */
+@media print {
+  body * { visibility: hidden; }
+
+  #report-print-area,
+  #report-print-area * { visibility: visible; }
+
+  #report-print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 24px;
+    background: #fff;
+  }
+
+  @page { margin: 16mm; }
+}
+
 @layer components {
-  /* Scrollbar styling */
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 4px;
+  /* Thin scrollbar for chat messages */
+  .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track { @apply bg-gray-100 rounded-full; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { @apply bg-gray-400; }
+}
+
+@layer utilities {
+  @keyframes slide-up {
+    from { transform: translateY(100%); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
   }
-  .scrollbar-thin::-webkit-scrollbar-track {
-    @apply bg-gray-100 rounded-full;
-  }
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply bg-gray-300 rounded-full;
-  }
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-400;
+  .animate-slide-up {
+    animation: slide-up 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   }
 }

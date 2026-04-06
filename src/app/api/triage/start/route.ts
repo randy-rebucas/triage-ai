@@ -42,7 +42,22 @@ async function handler(
     }
 
     const tenantId = await getTenantId();
-    const result   = await startTriageSession(patient.patientId, parsed.data, tenantId);
+    if (!tenantId) {
+      // Log slug so we can see what was received vs what the DB has
+      const { getTenantSlug } = await import("@/lib/tenant");
+      const slug = await getTenantSlug();
+      console.error(
+        `[POST /api/triage/start] tenantId resolved to null — slug received: "${slug ?? "(none)"}". ` +
+        "Check that the Tenant document exists in MongoDB with status='active'."
+      );
+      return errorResponse(
+        "Clinic configuration not found. Please refresh the page and try again.",
+        503,
+        "TENANT_NOT_FOUND"
+      );
+    }
+
+    const result = await startTriageSession(patient.patientId, parsed.data, tenantId);
 
     return successResponse(
       {
@@ -50,10 +65,11 @@ async function handler(
         firstQuestion:  result.firstQuestion,
         questionId:     result.questionId,
         inputType:      result.inputType,
+        isEmergency:    result.isEmergency,
         chiefComplaint: result.session.chiefComplaint,
         safetyFlags:    result.session.safetyFlags,
       },
-      "Triage session started",
+      result.isEmergency ? "Emergency fast-path triggered" : "Triage session started",
       201
     );
   } catch (err) {

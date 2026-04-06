@@ -128,24 +128,36 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── 4. Pass-through for API routes — derive tenant from Referer ──
-  // Client-supplied x-tenant-slug is untrusted. We instead extract
-  // the slug from the browser's Referer header (always set to the
-  // originating page URL by browsers) so the tenant context is
-  // anchored to the page the patient is actually viewing.
+  // ── 4. Pass-through for API routes — resolve tenant slug ─────────
+  // Priority order:
+  //   1. Referer header — browser always sets this to the originating
+  //      page URL, so the slug is anchored to the page the user views.
+  //   2. Client-supplied x-tenant-slug — fallback for clients that
+  //      don't send Referer (privacy settings, curl, mobile apps).
+  //      Accepted because the service layer enforces patient ownership,
+  //      so spoofing the slug cannot grant cross-tenant access.
   if (pathname.startsWith("/api/") || !tenantSlug) {
     const requestHeaders = new Headers(req.headers);
 
     if (pathname.startsWith("/api/")) {
-      // Always strip any client-forged value
-      requestHeaders.delete("x-tenant-slug");
-
+      // Try to derive from Referer first (preferred — browser-controlled)
+      let resolvedSlug: string | null = null;
       const referer = req.headers.get("referer");
       if (referer) {
         try {
-          const slug = extractTenantFromPath(new URL(referer).pathname);
-          if (slug) requestHeaders.set("x-tenant-slug", slug);
+          resolvedSlug = extractTenantFromPath(new URL(referer).pathname);
         } catch { /* ignore malformed referer */ }
+      }
+
+      // Fall back to the client-provided header if Referer gave nothing
+      if (!resolvedSlug) {
+        resolvedSlug = req.headers.get("x-tenant-slug");
+      }
+
+      if (resolvedSlug) {
+        requestHeaders.set("x-tenant-slug", resolvedSlug);
+      } else {
+        requestHeaders.delete("x-tenant-slug");
       }
     } else if (tenantSlug) {
       requestHeaders.set("x-tenant-slug", tenantSlug);
