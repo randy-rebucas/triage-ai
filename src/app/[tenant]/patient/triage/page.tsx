@@ -160,6 +160,30 @@ export default function TriagePage() {
         You will be notified when a doctor has validated the findings.
       </Alert>
 
+      {/* Saved-report notice */}
+      <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3.5">
+        <span className="text-xl leading-none flex-shrink-0">🔖</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-blue-800">Report saved to your account</p>
+          <p className="text-xs text-blue-700 mt-0.5">
+            You can re-open this report at any time from{" "}
+            <Link
+              href={`/${tenant}/patient/reports/${completedSession._id}`}
+              className="underline font-medium hover:text-blue-900"
+            >
+              My Reports
+            </Link>
+            .
+          </p>
+        </div>
+        <Link
+          href={`/${tenant}/patient/reports/${completedSession._id}`}
+          className="flex-shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+        >
+          Open saved report →
+        </Link>
+      </div>
+
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
@@ -202,8 +226,11 @@ export default function TriagePage() {
         <Link href={`/${tenant}/patient/dashboard`}>
           <Button variant="outline">← Back to Dashboard</Button>
         </Link>
+        <Link href={`/${tenant}/patient/reports/${completedSession._id}`}>
+          <Button variant="secondary">View Saved Report</Button>
+        </Link>
         <Link href={`/${tenant}/patient/reports`}>
-          <Button variant="secondary">View All Reports</Button>
+          <Button variant="ghost">All Reports</Button>
         </Link>
         <Button onClick={() => setCompletedSession(null)}>
           Start New Assessment

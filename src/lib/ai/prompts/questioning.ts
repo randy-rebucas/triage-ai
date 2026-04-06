@@ -215,11 +215,13 @@ Structured extraction from chief complaint:
 
   const nextNumber = answeredQuestions.length + 1;
 
+  const complaintFocusBlock = buildComplaintFocusBlock(extractedSymptoms, coveredByHistory);
+
   return `Patient: ${patientLine || "Not provided"}
 
 Chief Complaint:
 "${chiefComplaint}"
-${extractionBlock}
+${extractionBlock}${complaintFocusBlock}
 ━━━ DIMENSION TRACKING ━━━
 Already covered (DO NOT ask about these again): ${coveredByHistory.length ? coveredByHistory.join(", ") : "none"}
 Still missing (prioritise in this order): ${missing.length ? missing.join(", ") : "all covered — use clinical judgment"}
@@ -229,6 +231,7 @@ ${history}
 
 Task: Generate question ${nextNumber} — the single most important MISSING clarifying question.
 CRITICAL: You MUST NOT ask about any dimension already listed as "covered" above.
+- Follow the complaint-specific priority order above (if present) when choosing the next dimension.
 - If this is question 8, or you have sufficient data to complete assessment, set isLastQuestion to true.
 - Choose the inputType that best fits the question (see rules above).
 - Set progress proportional to completion (question ${nextNumber} of ~8).
@@ -254,6 +257,42 @@ ${DIMENSION_GUIDE}
 
 ${INPUT_TYPE_RULES}
 
+${QUESTION_RULES}
+
+━━━ COMPLAINT-ADAPTIVE BEHAVIOUR ━━━
+- When a "COMPLAINT-SPECIFIC CLINICAL FOCUS" block is provided, you MUST follow its priority order
+  to decide which dimension to ask about next.
+- Tailor question wording to the specific complaint (e.g. for chest pain ask about radiation to arm/jaw,
+  for headache ask about thunderclap onset, for abdominal pain ask about location first).
+- Never ask a generic question when a complaint-specific one is clinically more valuable.
+
+━━━ FEW-SHOT EXAMPLES ━━━
+
+Example A — cardiovascular complaint, Q1 (severity first per cardiac focus):
+On a scale of 0 to 10, how would you rate the chest pain right now?
+---
+{"questionId":"q_1","inputType":"slider","category":"severity","isLastQuestion":false,"progress":12}
+
+Example B — neurological complaint, Q1 (onset first per neurological focus):
+Did your headache come on suddenly like a thunderclap, or did it build up gradually?
+---
+{"questionId":"q_1","inputType":"text","category":"onset","isLastQuestion":false,"progress":12}
+
+Example C — gastrointestinal complaint, Q2 (location first per GI focus):
+Where exactly do you feel the stomach pain — is it in one specific spot or spread across your whole belly?
+---
+{"questionId":"q_2","inputType":"text","category":"location","isLastQuestion":false,"progress":25}
+
+Example D — radiation question for cardiac complaint:
+Does the pain spread to your arm, jaw, or shoulder?
+---
+{"questionId":"q_3","inputType":"yes_no","category":"radiation","isLastQuestion":false,"progress":38}
+
+Example E — final question:
+Are you currently taking any medications, including over-the-counter drugs or supplements?
+---
+{"questionId":"q_8","inputType":"yes_no","category":"history","isLastQuestion":true,"progress":100}
+
 ━━━ STRICT OUTPUT FORMAT ━━━
 Output EXACTLY two parts separated by a line containing only "---":
 
@@ -270,7 +309,7 @@ RULES:
 - isLastQuestion is true only if this is the final question (question 8 or enough data)`;
 }
 
-// ── Dimension keywords used to infer which clinical dimensions an
+// ─── Dimension keywords used to infer which clinical dimensions an
 //    answered Q&A pair has already addressed. ─────────────────────
 const DIMENSION_KEYWORDS: Record<string, string[]> = {
   onset:       ["start", "began", "sudden", "gradual", "thunderclap", "come on", "happen"],
@@ -285,19 +324,118 @@ const DIMENSION_KEYWORDS: Record<string, string[]> = {
   history:     ["before", "past", "history", "previous", "ever had", "medication", "allergy"],
 };
 
+// ─── Complaint-specific dimension priority by body system ─────────
+// When the extracted body system is known, override the default
+// dimension ordering with one tuned to the clinical complaint type.
+// Keys match the bodySystem values produced by symptomExtraction.
+const COMPLAINT_FOCUS: Record<string, { priorityDims: string[]; clinicalNote: string }> = {
+  cardiovascular: {
+    priorityDims: ["severity", "radiation", "associated", "onset", "aggravating", "history"],
+    clinicalNote:
+      "Cardiac complaint — prioritise severity (0–10 scale), radiation to arm/jaw/shoulder, " +
+      "associated symptoms (sweating, breathlessness, nausea), then history of heart disease.",
+  },
+  respiratory: {
+    priorityDims: ["severity", "onset", "associated", "aggravating", "character", "history"],
+    clinicalNote:
+      "Respiratory complaint — prioritise severity, onset (sudden vs gradual), " +
+      "associated symptoms (fever, productive cough, haemoptysis), triggers, and history of asthma/COPD.",
+  },
+  neurological: {
+    priorityDims: ["onset", "severity", "location", "associated", "character", "history"],
+    clinicalNote:
+      "Neurological complaint — prioritise onset (thunderclap = critical), severity, " +
+      "location (unilateral vs bilateral), associated symptoms (visual changes, weakness, slurred speech), " +
+      "and history of migraines or prior episodes.",
+  },
+  gastrointestinal: {
+    priorityDims: ["location", "character", "onset", "aggravating", "associated", "history"],
+    clinicalNote:
+      "GI complaint — prioritise specific location, character (cramping vs constant), " +
+      "onset, aggravating factors (meals, position), associated symptoms (vomiting, rectal bleeding, fever).",
+  },
+  musculoskeletal: {
+    priorityDims: ["location", "onset", "severity", "character", "aggravating", "relieving"],
+    clinicalNote:
+      "MSK complaint — prioritise exact location, mechanism of onset (trauma vs spontaneous), " +
+      "severity, character (sharp vs dull), and what aggravates or relieves it.",
+  },
+  genitourinary: {
+    priorityDims: ["location", "character", "associated", "onset", "history"],
+    clinicalNote:
+      "GU complaint — prioritise location, character (burning, pressure, colicky), " +
+      "associated symptoms (haematuria, discharge, fever), and relevant past history.",
+  },
+  dermatological: {
+    priorityDims: ["location", "onset", "character", "associated", "aggravating", "history"],
+    clinicalNote:
+      "Dermatological complaint — prioritise location/distribution, onset, character (rash type, " +
+      "itch, pain), associated systemic symptoms, and history of skin conditions or allergies.",
+  },
+  psychiatric: {
+    priorityDims: ["onset", "severity", "history", "associated", "aggravating"],
+    clinicalNote:
+      "Psychiatric/mental-health complaint — prioritise onset, severity of functional impairment, " +
+      "history of prior episodes or diagnoses, associated somatic symptoms, and any safety concerns.",
+  },
+  endocrine: {
+    priorityDims: ["onset", "duration", "associated", "severity", "history"],
+    clinicalNote:
+      "Endocrine complaint — prioritise onset, duration, associated symptoms (polyuria, polydipsia, " +
+      "weight change, heat/cold intolerance), and history of diabetes or thyroid disease.",
+  },
+  general: {
+    priorityDims: ["onset", "duration", "severity", "associated", "history"],
+    clinicalNote:
+      "General/systemic complaint — cover onset, duration, severity, associated symptoms, " +
+      "and relevant medical history.",
+  },
+};
+
+/**
+ * Build a complaint-specific clinical focus block for the AI prompt.
+ * Returns an empty string when no body-system context is available.
+ */
+function buildComplaintFocusBlock(
+  extractedSymptoms: SymptomExtractionResult | undefined,
+  coveredDimensions: string[]
+): string {
+  if (!extractedSymptoms?.bodySystem) return "";
+
+  const focus =
+    COMPLAINT_FOCUS[extractedSymptoms.bodySystem] ?? COMPLAINT_FOCUS["general"];
+
+  const remainingPriority = focus.priorityDims.filter(
+    (d) => !coveredDimensions.includes(d)
+  );
+  if (remainingPriority.length === 0) return "";
+
+  return `
+━━━ COMPLAINT-SPECIFIC CLINICAL FOCUS ━━━
+Body system  : ${extractedSymptoms.bodySystem}
+Clinical note: ${focus.clinicalNote}
+Priority order for remaining dimensions: ${remainingPriority.join(" → ")}
+You MUST follow this priority order when picking the next question.`;
+}
+
 /**
  * Infer which clinical dimensions are covered by a set of Q&A pairs.
- * Uses simple keyword matching — good enough for prompt context.
+ * Scans both question text AND answer text — if a patient volunteered
+ * duration info in their answer to a different question, that dimension
+ * is still considered covered and should not be asked again.
  */
 function inferCoveredDimensions(
   answeredQuestions: { question: string; answer: string }[],
   extractionCovered: string[] = []
 ): string[] {
   const covered = new Set(extractionCovered);
-  for (const { question } of answeredQuestions) {
+  for (const { question, answer } of answeredQuestions) {
     const q = question.toLowerCase();
+    const a = answer.toLowerCase();
     for (const [dim, keywords] of Object.entries(DIMENSION_KEYWORDS)) {
-      if (keywords.some((kw) => q.includes(kw))) covered.add(dim);
+      if (keywords.some((kw) => q.includes(kw) || a.includes(kw))) {
+        covered.add(dim);
+      }
     }
   }
   return Array.from(covered);
@@ -348,10 +486,11 @@ Symptom extraction:
       : "No prior questions answered.";
 
   const nextNumber = answeredQuestions.length + 1;
+  const complaintFocusBlock = buildComplaintFocusBlock(extractedSymptoms, coveredByHistory);
 
   return `Patient: ${patientLine || "Not provided"}
 Chief Complaint: "${chiefComplaint}"
-${extractionBlock}
+${extractionBlock}${complaintFocusBlock}
 ━━━ DIMENSION TRACKING ━━━
 Already covered (DO NOT ask about these again): ${coveredByHistory.length ? coveredByHistory.join(", ") : "none"}
 Still missing (prioritise in this order): ${missing.length ? missing.join(", ") : "all covered — use clinical judgment"}
@@ -361,6 +500,7 @@ ${history}
 
 Generate question ${nextNumber}.
 CRITICAL: You MUST NOT ask about any dimension already listed as "covered" above.
+Follow the complaint-specific priority order (if present above) to pick the next dimension.
 Pick the single most important MISSING dimension.
 ${answeredQuestions.length >= 7 ? "This MUST be the last question — set isLastQuestion: true." : ""}
 
