@@ -5,7 +5,7 @@ export default function OfflinePage() {
         <div className="text-5xl mb-4">🏥</div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">You&apos;re offline</h1>
         <p className="text-gray-500 mb-6">
-          ClinicAI needs an internet connection. Please check your network and try again.
+          Triage AI needs an internet connection. Please check your network and try again.
         </p>
         <a
           href="/"
@@ -19,5 +19,5 @@ export default function OfflinePage() {
 }
 
 export const metadata = {
-  title: "Offline — ClinicAI",
+  title: "Offline — Triage AI",
 };

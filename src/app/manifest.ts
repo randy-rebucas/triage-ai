@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "ClinicAI — AI-Powered Patient Triage",
-    short_name: "ClinicAI",
+    name: "Triage AI — AI-Powered Patient Triage",
+    short_name: "Triage AI",
     description:
       "AI-assisted patient triage and clinic management. Describe your symptoms and get a structured assessment in minutes.",
     start_url: "/",

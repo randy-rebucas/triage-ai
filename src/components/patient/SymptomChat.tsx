@@ -131,15 +131,15 @@ function PainSlider({
     <div className="space-y-3 py-1">
       {/* Numeric display */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-400">No pain</span>
-        <div className="text-center">
+        <span className="hidden sm:inline text-xs text-gray-400">No pain</span>
+        <div className="text-center flex-1 sm:flex-none">
           <span className={`text-4xl font-bold tabular-nums leading-none ${colour}`}>
             {value}
           </span>
           <span className="ml-1 text-sm text-gray-400">/10</span>
           <p className={`text-xs font-medium mt-0.5 ${colour}`}>{labelText}</p>
         </div>
-        <span className="text-xs text-gray-400">Worst pain</span>
+        <span className="hidden sm:inline text-xs text-gray-400">Worst pain</span>
       </div>
 
       {/* Range track */}
@@ -158,8 +158,8 @@ function PainSlider({
         aria-valuenow={value}
       />
 
-      {/* Tick labels */}
-      <div className="flex justify-between" aria-hidden="true">
+      {/* Tick labels — hidden on very narrow screens to prevent overflow */}
+      <div className="hidden sm:flex justify-between" aria-hidden="true">
         {Array.from({ length: 11 }, (_, i) => (
           <span
             key={i}
@@ -708,7 +708,7 @@ export function SymptomChat({ onComplete, tenantSlug }: SymptomChatProps) {
                   onClick={step === "complaint" ? handleSubmitComplaint : () => handleSubmitAnswer()}
                   disabled={!canSendText || isLoading}
                   aria-label="Send message"
-                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-all duration-150
+                  className={`flex h-10 w-10 sm:h-8 sm:w-8 flex-shrink-0 items-center justify-center rounded-full transition-all duration-150
                     focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500
                     ${canSendText && !isLoading
                       ? "bg-blue-600 text-white hover:bg-blue-700"

@@ -67,27 +67,27 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
       {/* Header */}
-      <header className="border-b border-gray-200 bg-white/80 backdrop-blur-sm sticky top-0 z-10 px-6 py-4">
+      <header className="border-b border-gray-200 bg-white/80 backdrop-blur-sm sticky top-0 z-10 px-4 sm:px-6 py-4">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600">
-              <span className="font-bold text-white text-sm">CA</span>
+              <span className="font-bold text-white text-sm">TA</span>
             </div>
-            <span className="text-xl font-bold text-gray-900">ClinicAI</span>
+            <span className="text-xl font-bold text-gray-900">Triage AI</span>
           </div>
           <Link
-            href="/onboard"
-            className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+            href="https://www.myclinicsoft.solutions/tenant-onboard" target="_blank"
+            className="inline-flex items-center min-h-[44px] text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
           >
             Register your clinic →
           </Link>
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-12">
+      <main className="mx-auto max-w-4xl px-4 sm:px-6 py-8 sm:py-12">
         {/* Hero text */}
         <div className="text-center mb-10">
-          <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight">
             Find your clinic
           </h1>
           <p className="mt-3 text-lg text-gray-500">
@@ -114,7 +114,7 @@ export default function HomePage() {
           {query && (
             <button
               onClick={() => setQuery("")}
-              className="absolute inset-y-0 right-4 flex items-center text-gray-400 hover:text-gray-600"
+              className="absolute inset-y-0 right-2 sm:right-4 flex items-center justify-center min-h-[44px] min-w-[44px] text-gray-400 hover:text-gray-600"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -177,13 +177,13 @@ export default function HomePage() {
         )}
 
         {/* Register CTA (bottom) */}
-        <div className="mt-12 rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
+        <div className="mt-10 sm:mt-12 rounded-2xl border border-dashed border-gray-300 bg-white p-6 sm:p-8 text-center">
           <p className="font-semibold text-gray-900">Not seeing your clinic?</p>
           <p className="text-sm text-gray-500 mt-1 mb-5">
             Register your clinic and start your free trial today.
           </p>
           <Link
-            href="/onboard"
+            href="https://www.myclinicsoft.solutions/tenant-onboard" target="_blank"
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
           >
             Register a Clinic →

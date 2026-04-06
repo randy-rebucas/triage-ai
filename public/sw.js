@@ -1,5 +1,5 @@
 /**
- * ClinicAI Service Worker
+ * Triage AI Service Worker
  *
  * Strategy:
  *  - App shell (JS/CSS/fonts) → Cache-First (stale-while-revalidate)
@@ -153,7 +153,7 @@ async function networkFirstWithOfflineFallback(request) {
       new Response(
         `<!doctype html><html lang="en"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>Offline — ClinicAI</title>
+        <title>Offline — Triage AI</title>
         <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb;color:#111827}
         .card{background:#fff;border-radius:16px;padding:40px;text-align:center;max-width:400px;box-shadow:0 4px 24px rgba(0,0,0,.08)}
         h1{font-size:1.5rem;margin:0 0 8px}p{color:#6b7280;margin:0 0 24px}
@@ -161,7 +161,7 @@ async function networkFirstWithOfflineFallback(request) {
         </head><body><div class="card">
         <div style="font-size:3rem;margin-bottom:16px">🏥</div>
         <h1>You're offline</h1>
-        <p>ClinicAI needs an internet connection. Please check your network and try again.</p>
+        <p>Triage AI needs an internet connection. Please check your network and try again.</p>
         <a href="/">Retry</a></div></body></html>`,
         { status: 200, headers: { "Content-Type": "text/html;charset=utf-8" } },
       )

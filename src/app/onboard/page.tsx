@@ -101,7 +101,7 @@ export default function OnboardPage() {
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 to-brand-100 px-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-4 sm:p-8 text-center">
           <div className="mx-auto mb-6 flex items-center justify-center w-16 h-16 rounded-full bg-green-100">
             <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -167,7 +167,7 @@ export default function OnboardPage() {
         </div>
 
         <form onSubmit={step === 1 ? (e) => { e.preventDefault(); setStep(2); } : handleSubmit}
-          className="bg-white rounded-2xl shadow-xl p-8 space-y-5">
+          className="bg-white rounded-2xl shadow-xl p-4 sm:p-8 space-y-5">
 
           {error && (
             <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
@@ -195,23 +195,23 @@ export default function OnboardPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subdomain <span className="text-red-500">*</span>
                 </label>
-                <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-transparent">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:border sm:border-gray-300 sm:rounded-lg sm:overflow-hidden sm:focus-within:ring-2 sm:focus-within:ring-brand-500 sm:focus-within:border-transparent gap-2 sm:gap-0">
                   <input
                     type="text"
                     value={form.subdomain}
                     onChange={set("subdomain")}
                     required
                     placeholder="sunshine"
-                    className="flex-1 px-4 py-2.5 outline-none"
+                    className="flex-1 px-4 py-2.5 outline-none border border-gray-300 rounded-lg sm:border-0 sm:rounded-none focus:ring-2 focus:ring-brand-500 focus:border-transparent sm:focus:ring-0 sm:focus:border-transparent"
                   />
-                  <span className="px-3 py-2.5 bg-gray-50 border-l border-gray-300 text-gray-500 text-sm whitespace-nowrap">
+                  <span className="px-3 py-2 sm:py-2.5 bg-gray-50 border border-gray-300 rounded-lg sm:border-0 sm:border-l sm:rounded-none text-gray-500 text-sm whitespace-nowrap text-center sm:text-left">
                     .myclinicsoft.com
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-gray-500">Lowercase letters, numbers, hyphens only</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
                   <input
@@ -234,7 +234,7 @@ export default function OnboardPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
                   <select

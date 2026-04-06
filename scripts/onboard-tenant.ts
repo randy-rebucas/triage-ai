@@ -29,7 +29,6 @@ if (!MONGODB_URI) {
 // ─── Models (inline to avoid Next.js server-only imports) ─────────
 import Tenant, { RESERVED_SUBDOMAINS, SUBDOMAIN_REGEX } from "../src/models/Tenant";
 import User from "../src/models/User";
-import Settings from "../src/models/Settings";
 
 // ─── Readline helper ──────────────────────────────────────────────
 const rl = readline.createInterface({
@@ -152,14 +151,6 @@ async function main() {
     role: "doctor",
     tenantId,
     isActive: true,
-  });
-
-  await Settings.create({
-    tenantId,
-    clinicName: name,
-    clinicEmail: email || undefined,
-    timezone,
-    currency,
   });
 
   console.log(`✅  Tenant created!`);

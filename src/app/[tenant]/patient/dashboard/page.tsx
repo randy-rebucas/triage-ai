@@ -56,10 +56,10 @@ export default async function PatientDashboardPage({ params }: Props) {
 
       {/* Recent sessions */}
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Recent Assessments</h2>
           {total > 5 && (
-            <Link href={`/${tenant}/patient/reports`}>
+            <Link href={`/${tenant}/patient/reports`} className="self-start sm:self-auto">
               <Button variant="ghost" size="sm">View all →</Button>
             </Link>
           )}
@@ -81,14 +81,14 @@ export default async function PatientDashboardPage({ params }: Props) {
             {sessions.map((session) => (
               <Link key={session._id} href={`/${tenant}/patient/reports/${session._id}`}>
                 <Card className="hover:border-blue-300 hover:shadow-md transition-all cursor-pointer">
-                  <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-gray-900 truncate">{session.chiefComplaint}</p>
-                      <span className="text-sm text-gray-500">
-                        {format(new Date(session.createdAt), "MMMM d, yyyy")}
+                      <span className="text-xs sm:text-sm text-gray-500">
+                        {format(new Date(session.createdAt), "MMM d, yyyy")}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 flex-shrink-0 justify-end">
                       <RiskBadge level={session.riskLevel} />
                       <Badge variant={session.status === "reviewed" ? "success" : session.status === "pending_review" ? "info" : "default"}>
                         {session.status === "reviewed" ? "Reviewed" : session.status === "pending_review" ? "Pending" : "Draft"}

@@ -83,7 +83,7 @@ export default function PWAProvider() {
       {showBanner && !updateReady && (
         <div
           role="banner"
-          aria-label="Install ClinicAI app"
+          aria-label="Install Triage AI app"
           className="fixed bottom-4 left-4 right-4 z-50 max-w-sm mx-auto bg-white border border-blue-200 rounded-2xl shadow-xl p-4 flex items-start gap-3 animate-slide-up"
         >
           <div className="shrink-0 w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white text-lg">
@@ -91,7 +91,7 @@ export default function PWAProvider() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900 leading-tight">
-              Add ClinicAI to your home screen
+              Add Triage AI to your home screen
             </p>
             <p className="text-xs text-gray-500 mt-0.5">
               Faster access, works offline

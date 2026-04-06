@@ -1,4 +1,4 @@
-# ClinicAI — AI-Powered Clinic Management System
+# Triage AI — AI-Powered Clinic Management System
 
 A production-grade Clinic Management System with an intelligent AI Triage Engine, built with Next.js 15, MongoDB, and OpenAI GPT-4o.
 

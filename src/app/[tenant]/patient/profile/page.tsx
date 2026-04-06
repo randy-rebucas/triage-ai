@@ -43,14 +43,14 @@ export default async function PatientProfilePage({ params }: Props) {
 
       {/* Identity card */}
       <Card>
-        <div className="flex items-center gap-5">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-100 text-2xl font-bold text-blue-700 flex-shrink-0">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-blue-100 text-xl sm:text-2xl font-bold text-blue-700 flex-shrink-0">
             {email?.[0]?.toUpperCase() || "P"}
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">{email || patientCode}</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 break-all">{email || patientCode}</h2>
             {patientCode && (
-              <p className="text-sm font-mono text-gray-400 mt-0.5">{patientCode}</p>
+              <p className="text-sm font-mono text-gray-400 mt-0.5 truncate">{patientCode}</p>
             )}
           </div>
         </div>
@@ -73,13 +73,13 @@ export default async function PatientProfilePage({ params }: Props) {
 
       {/* Recent sessions */}
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">
             Recent Assessments
             {total > 0 && <span className="ml-2 text-sm font-normal text-gray-400">({total} total)</span>}
           </h2>
           {total > 5 && (
-            <Link href={`/${tenant}/patient/reports`}>
+            <Link href={`/${tenant}/patient/reports`} className="self-start sm:self-auto">
               <Button variant="ghost" size="sm">View all →</Button>
             </Link>
           )}

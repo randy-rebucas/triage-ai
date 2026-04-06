@@ -29,9 +29,6 @@ import Tenant from "../src/models/Tenant";
 import User from "../src/models/User";
 import Patient from "../src/models/Patient";
 import TriageSession from "../src/models/TriageSession";
-import ClinicalRecord from "../src/models/ClinicalRecord";
-import AuditLog from "../src/models/AuditLog";
-import Settings from "../src/models/Settings";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q: string) => new Promise<string>((res) => rl.question(q, (a) => res(a.trim())));
@@ -78,13 +75,10 @@ async function main() {
     User.deleteMany({ tenantId: tid }),
     Patient.deleteMany({ tenantIds: tid }),
     TriageSession.deleteMany({ tenantId: tid }),
-    ClinicalRecord.deleteMany({ tenantId: tid }),
-    AuditLog.deleteMany({ tenantId: tid }),
-    Settings.deleteMany({ tenantId: tid }),
   ]);
 
   results.forEach((r, i) => {
-    const labels = ["Users", "Patients", "TriageSessions", "ClinicalRecords", "AuditLogs", "Settings"];
+    const labels = ["Users", "Patients", "TriageSessions"];
     if (r.status === "fulfilled") {
       console.log(`  ✔  ${labels[i]}: ${(r.value as { deletedCount: number }).deletedCount} deleted`);
     } else {

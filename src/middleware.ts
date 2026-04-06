@@ -9,7 +9,6 @@ import {
 //
 // URL structure:
 //   /{tenant}/login          → tenant login
-//   /{tenant}/register       → patient self-registration
 //   /{tenant}/patient/*      → patient-only pages (requires patient_session)
 //   /onboard                 → root-level clinic registration
 //   /                        → landing / clinic directory
@@ -22,10 +21,9 @@ const RESERVED_PATHS = new Set([
   "images", "icons", "fonts", "robots.txt", "sitemap.xml",
 ]);
 
-const AUTH_SEGMENTS = new Set(["login", "register"]);
+const AUTH_SEGMENTS = new Set(["login"]);
 
 const CSRF_EXEMPT_PATHS = [
-  "/api/subscription/webhook",
   "/api/tenants/onboard",
   // Patient auth — no session cookie exists yet at these endpoints
   "/api/patients/auth/login",
@@ -77,20 +75,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
   const method = req.method;
 
-  // ── 1. Cron route protection ────────────────────────────────────
-  if (pathname.startsWith("/api/cron/")) {
-    const cronSecret = process.env.CRON_SECRET;
-    const isProd = process.env.NODE_ENV === "production";
-    if (isProd && !cronSecret) return json({ error: "Unavailable" }, 503);
-    if (isProd && req.headers.get("authorization") !== `Bearer ${cronSecret}`) {
-      return json({ error: "Unauthorized" }, 401);
-    }
-  }
-
-  // ── 2. Extract tenant from path ─────────────────────────────────
+  // ── 1. Extract tenant from path ─────────────────────────────────
   const tenantSlug = extractTenantFromPath(pathname);
 
-  // ── 3. CSRF protection (API routes with a patient session cookie) ─
+  // ── 2. CSRF protection (API routes with a patient session cookie) ─
   if (
     pathname.startsWith("/api/") &&
     CSRF_METHODS.has(method) &&
@@ -128,7 +116,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── 4. Pass-through for API routes — resolve tenant slug ─────────
+  // ── 3. Pass-through for API routes — resolve tenant slug ─────────
   // Priority order:
   //   1. Referer header — browser always sets this to the originating
   //      page URL, so the slug is anchored to the page the user views.
@@ -167,7 +155,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return addSecurityHeaders(res);
   }
 
-  // ── 5. Tenant path — determine sub-path ─────────────────────────
+  // ── 4. Tenant path — determine sub-path ─────────────────────────
   const subPath      = pathname.slice(tenantSlug.length + 1) || "/";
   const subParts     = subPath.split("/").filter(Boolean);
   const secondSegment = subParts[0] || "";
@@ -177,24 +165,24 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 
   const patientToken = extractPatientCookieToken(req.headers.get("cookie"));
 
-  // ── 6. Redirect authenticated patients away from login/register ──
+  // ── 5. Redirect authenticated patients away from login ──
   if (isAuthPage && patientToken) {
     try {
       await verifyPatientTokenEdge(patientToken);
       return NextResponse.redirect(
-        new URL(`/${tenantSlug}/patient/profile`, req.url)
+        new URL(`/${tenantSlug}/patient/dashboard`, req.url)
       );
     } catch { /* expired — fall through to login */ }
   }
 
-  // ── 7. Public pages (login, register, clinic landing) pass through ─
+  // ── 6. Public pages (login, clinic landing) pass through ─
   if (!isPatientPage) {
     const res = NextResponse.next();
     res.headers.set("x-tenant-slug", tenantSlug);
     return addSecurityHeaders(res);
   }
 
-  // ── 8. Patient-only pages — require valid patient_session ────────
+  // ── 7. Patient-only pages — require valid patient_session ────────
   if (!patientToken) {
     const loginUrl = new URL(`/${tenantSlug}/login`, req.url);
     loginUrl.searchParams.set("from", pathname);

@@ -18,7 +18,7 @@ export default async function ClinicEntryPage({ params }: Props) {
   const token        = cookieStore.get("patient_session")?.value;
 
   if (token) {
-    redirect(`/${tenant}/patient/profile`);
+    redirect(`/${tenant}/patient/dashboard`);
   }
 
   redirect(`/${tenant}/login`);

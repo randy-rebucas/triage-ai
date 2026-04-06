@@ -105,7 +105,7 @@ async function downloadPDF(session: ITriageSession) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(255, 255, 255);
-  doc.text("ClinicAI — Pre-Consultation Report", MARGIN, 12);
+  doc.text("Triage AI — Pre-Consultation Report", MARGIN, 12);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
@@ -207,13 +207,13 @@ async function downloadPDF(session: ITriageSession) {
   y += 6;
 
   // ── Page numbers ──────────────────────────────────────────────
-  const totalPages = (doc as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages();
+  const totalPages = doc.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(156, 163, 175); // gray-400
-    doc.text(`ClinicAI Triage Report  •  Page ${p} of ${totalPages}`, MARGIN, 293);
+    doc.text(`Triage AI Report  •  Page ${p} of ${totalPages}`, MARGIN, 293);
     doc.text("Confidential — For Clinical Use Only", PAGE_W - MARGIN, 293, { align: "right" });
   }
 
@@ -294,12 +294,13 @@ export function ReportActions({ session }: ReportActionsProps) {
             Download a PDF copy or send it directly to your inbox.
           </p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto sm:flex-shrink-0">
           <Button
             variant="outline"
             onClick={handleDownload}
             isLoading={downloading}
             aria-label="Download report as PDF"
+            className="w-full sm:w-auto justify-center"
           >
             {!downloading && (
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
@@ -314,6 +315,7 @@ export function ReportActions({ session }: ReportActionsProps) {
             variant="primary"
             onClick={() => setModalOpen(true)}
             aria-label="Send report to email"
+            className="w-full sm:w-auto justify-center"
           >
             {/* Email icon */}
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
@@ -342,7 +344,7 @@ export function ReportActions({ session }: ReportActionsProps) {
           />
 
           {/* Panel */}
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl p-6 animate-slide-up">
+          <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl p-4 sm:p-6 animate-slide-up">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 id="email-modal-title" className="text-lg font-bold text-gray-900">
@@ -355,7 +357,7 @@ export function ReportActions({ session }: ReportActionsProps) {
               <button
                 onClick={() => setModalOpen(false)}
                 aria-label="Close"
-                className="ml-4 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                className="ml-4 flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors flex-shrink-0"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -398,12 +400,12 @@ export function ReportActions({ session }: ReportActionsProps) {
                 </div>
               )}
 
-              <div className="flex gap-2 justify-end pt-1">
+              <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="rounded-xl px-4 py-2 text-sm font-medium text-gray-600
-                    hover:bg-gray-100 transition-colors"
+                  className="w-full sm:w-auto rounded-xl px-4 py-2.5 sm:py-2 text-sm font-medium text-gray-600
+                    hover:bg-gray-100 transition-colors text-center"
                 >
                   {result?.ok ? "Close" : "Cancel"}
                 </button>
@@ -411,9 +413,9 @@ export function ReportActions({ session }: ReportActionsProps) {
                   <button
                     type="submit"
                     disabled={sending || !email.trim()}
-                    className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white
+                    className="w-full sm:w-auto rounded-xl bg-blue-600 px-5 py-2.5 sm:py-2 text-sm font-semibold text-white
                       hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed
-                      transition-colors flex items-center gap-2"
+                      transition-colors flex items-center justify-center gap-2"
                   >
                     {sending && (
                       <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">

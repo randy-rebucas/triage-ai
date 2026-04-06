@@ -69,7 +69,7 @@ async function sendOtpSms(to: string, otp: string): Promise<void> {
   const body = new URLSearchParams({
     To:   to,
     From: from,
-    Body: `Your ClinicAI verification code is: ${otp}. Valid for 5 minutes.`,
+    Body: `Your Triage AI verification code is: ${otp}. Valid for 5 minutes.`,
   });
 
   const res = await fetch(url, {

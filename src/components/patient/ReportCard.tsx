@@ -162,9 +162,9 @@ export function ReportCard({ session }: ReportCardProps) {
               const pct = CONFIDENCE_WIDTH[cond.likelihood] ?? Math.round(cond.confidence * 100);
               return (
                 <li key={`${cond.name}-${idx}`} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-gray-800">{cond.name}</span>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-sm font-semibold text-gray-800 min-w-0 break-words">{cond.name}</span>
+                    <span className={`self-start sm:self-auto flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
                       cond.likelihood === "high"     ? "bg-red-100 text-red-700" :
                       cond.likelihood === "moderate" ? "bg-orange-100 text-orange-700" :
                                                        "bg-blue-100 text-blue-700"

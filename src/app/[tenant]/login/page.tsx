@@ -71,7 +71,7 @@ export default function LoginPage() {
   }, [countdown]);
 
   const redirectAfterLogin = useCallback(() => {
-    router.push(`/${tenant}/patient/profile`);
+    router.push(`/${tenant}/patient/dashboard`);
     router.refresh();
   }, [router, tenant]);
 
@@ -188,10 +188,10 @@ export default function LoginPage() {
         <div className="mb-8 text-center">
           <Link href="/" className="inline-flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600">
-              <span className="font-bold text-white text-lg">CA</span>
+              <span className="font-bold text-white text-lg">TA</span>
             </div>
           </Link>
-          <h1 className="mt-4 text-2xl font-bold text-gray-900">Sign in to ClinicAI</h1>
+          <h1 className="mt-4 text-2xl font-bold text-gray-900">Sign in to Triage AI</h1>
           <p className="mt-1 text-sm text-blue-600 font-medium capitalize">{tenant}</p>
         </div>
 
@@ -205,7 +205,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={[
-                  "flex-1 py-3.5 text-sm font-medium transition-colors",
+                  "flex-1 py-3 sm:py-3.5 text-xs sm:text-sm font-medium transition-colors min-h-[44px]",
                   activeTab === tab.id
                     ? "border-b-2 border-blue-600 text-blue-600 bg-blue-50/40"
                     : "text-gray-500 hover:text-gray-700 hover:bg-gray-50",
@@ -216,7 +216,7 @@ export default function LoginPage() {
             ))}
           </div>
 
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
 
             {/* ─────────── Tab 1 — Password ─────────── */}
             {activeTab === "password" && (
@@ -359,12 +359,6 @@ export default function LoginPage() {
               </>
             )}
 
-            <p className="mt-6 text-center text-sm text-gray-500">
-              Don&apos;t have an account?{" "}
-              <Link href={`/${tenant}/register`} className="font-medium text-blue-600 hover:underline">
-                Create one
-              </Link>
-            </p>
           </div>
         </div>
 

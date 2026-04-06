@@ -55,10 +55,3 @@ export function useTenant(): TenantCachePayload {
   return ctx;
 }
 
-/**
- * Safe version — returns null if called outside a TenantProvider
- * (e.g. in shared layouts that may or may not have tenant context).
- */
-export function useTenantSafe(): TenantCachePayload | null {
-  return useContext(TenantContext);
-}

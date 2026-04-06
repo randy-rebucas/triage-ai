@@ -125,7 +125,7 @@ export default function TriagePage() {
           ))}
         </div>
 
-        <Card padding="md" className="flex flex-col" style={{ minHeight: 600 }}>
+        <Card padding="md" className="flex flex-col min-h-[50vh] sm:min-h-[600px]">
           <SymptomChat onComplete={setCompletedSession} tenantSlug={tenant} />
         </Card>
       </div>

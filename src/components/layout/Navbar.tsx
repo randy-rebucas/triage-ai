@@ -46,9 +46,9 @@ export function Navbar({ userName, tenantSlug }: NavbarProps) {
         {/* Logo */}
         <Link href={base || "/"} className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
-            <span className="text-sm font-bold text-white">CA</span>
+            <span className="text-sm font-bold text-white">TA</span>
           </div>
-          <span className="hidden font-bold text-gray-900 sm:block">ClinicAI</span>
+          <span className="hidden font-bold text-gray-900 sm:block">Triage AI</span>
         </Link>
 
         {/* Desktop nav */}
@@ -93,7 +93,7 @@ export function Navbar({ userName, tenantSlug }: NavbarProps) {
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((o) => !o)}
-            className="inline-flex items-center justify-center rounded-lg p-2 text-gray-600 hover:bg-gray-100 md:hidden"
+            className="inline-flex items-center justify-center rounded-lg min-h-[44px] min-w-[44px] text-gray-600 hover:bg-gray-100 md:hidden"
           >
             {menuOpen ? (
               <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

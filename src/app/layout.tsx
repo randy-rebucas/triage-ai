@@ -7,8 +7,8 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: {
-    default: "ClinicAI — AI-Powered Patient Triage",
-    template: "%s | ClinicAI",
+    default: "Triage AI — AI-Powered Patient Triage",
+    template: "%s | Triage AI",
   },
   description:
     "A modern clinic management system with AI-assisted patient triage. Secure, compliant, and built for healthcare professionals.",
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ClinicAI",
+    title: "Triage AI",
   },
   icons: {
     icon: [
