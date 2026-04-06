@@ -3,24 +3,231 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/Button";
 import type { ITriageSession } from "@/types";
+import { format } from "date-fns";
 
 // ─────────────────────────────────────────────────────────────────
 // ReportActions — Download PDF + Send to Email buttons
 //
-// PDF: uses window.print() scoped to the #report-print-area div
-//      (print CSS hides everything else)
+// PDF: generated client-side with jspdf (text-based, compressed)
+//      → direct file download, no print dialog
 // Email: modal with email input → POST /api/triage/[id]/email-report
 // ─────────────────────────────────────────────────────────────────
 
 interface ReportActionsProps {
   session: ITriageSession;
-  /** Auth cookie is forwarded automatically by the browser */
+}
+
+// ── PDF generation ─────────────────────────────────────────────
+async function downloadPDF(session: ITriageSession) {
+  // Dynamically import jspdf so it stays out of the initial bundle
+  const { jsPDF } = await import("jspdf");
+
+  const doc  = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  const PAGE_W    = 210;
+  const MARGIN    = 14;
+  const LINE_W    = PAGE_W - MARGIN * 2;
+  const LINE_H    = 6;
+  let   y         = MARGIN;
+
+  const { aiReport, safetyFlags, riskLevel, riskScore, chiefComplaint, createdAt } = session;
+
+  // ── helpers ──────────────────────────────────────────────────
+  function checkPage(needed = LINE_H) {
+    if (y + needed > 280) { doc.addPage(); y = MARGIN; }
+  }
+
+  function heading1(text: string) {
+    checkPage(10);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(30, 58, 138);   // blue-900
+    doc.text(text, MARGIN, y);
+    y += 8;
+  }
+
+  function heading2(text: string) {
+    checkPage(8);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(31, 41, 55);    // gray-800
+    doc.text(text, MARGIN, y);
+    y += 6;
+  }
+
+  function body(text: string, indent = 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(55, 65, 81);    // gray-700
+    const lines = doc.splitTextToSize(text, LINE_W - indent);
+    lines.forEach((line: string) => {
+      checkPage();
+      doc.text(line, MARGIN + indent, y);
+      y += LINE_H - 1;
+    });
+  }
+
+  function label(text: string) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(107, 114, 128); // gray-500
+    checkPage(5);
+    doc.text(text.toUpperCase(), MARGIN, y);
+    y += 4;
+  }
+
+  function divider() {
+    checkPage(4);
+    doc.setDrawColor(229, 231, 235); // gray-200
+    doc.setLineWidth(0.2);
+    doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+    y += 4;
+  }
+
+  function bullet(text: string, color: [number, number, number] = [59, 130, 246]) {
+    checkPage();
+    doc.setFillColor(...color);
+    doc.circle(MARGIN + 1.5, y - 1.5, 1, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(55, 65, 81);
+    const lines = doc.splitTextToSize(text, LINE_W - 6);
+    lines.forEach((line: string, i: number) => {
+      if (i > 0) checkPage();
+      doc.text(line, MARGIN + 5, y);
+      y += LINE_H - 1;
+    });
+  }
+
+  // ── Cover / header ────────────────────────────────────────────
+  doc.setFillColor(37, 99, 235);   // blue-600
+  doc.rect(0, 0, PAGE_W, 28, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(255, 255, 255);
+  doc.text("ClinicAI — Pre-Consultation Report", MARGIN, 12);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(191, 219, 254); // blue-200
+  doc.text(
+    createdAt ? `Generated: ${format(new Date(createdAt), "PPP 'at' p")}` : "Generated just now",
+    MARGIN, 20,
+  );
+  doc.text(`Risk: ${riskLevel?.toUpperCase() ?? "—"}  |  Score: ${riskScore ?? 0}/100`, MARGIN, 25);
+  y = 36;
+
+  // ── Chief complaint ───────────────────────────────────────────
+  heading1("Chief Complaint");
+  body(chiefComplaint || "—");
+  y += 2;
+  divider();
+
+  // ── Summary ───────────────────────────────────────────────────
+  if (aiReport?.summary) {
+    heading2("Assessment Summary");
+    const s = aiReport.summary;
+    if (s.duration) { label("Duration");  body(s.duration,  4); }
+    if (s.severity) { label("Severity");  body(s.severity,  4); }
+    if (s.onset)    { label("Onset");     body(s.onset,     4); }
+    y += 2;
+    divider();
+  }
+
+  // ── Safety flags ──────────────────────────────────────────────
+  if (safetyFlags && safetyFlags.length > 0) {
+    heading2("Attention Points");
+    safetyFlags.forEach((f) => {
+      const color: [number, number, number] =
+        f.severity === "emergency" ? [220, 38, 38] :
+        f.severity === "urgent"    ? [234, 88, 12] : [202, 138, 4];
+      bullet(f.flag, color);
+    });
+    y += 2;
+    divider();
+  }
+
+  // ── Possible conditions ───────────────────────────────────────
+  if (aiReport?.possibleConditions && aiReport.possibleConditions.length > 0) {
+    heading2("Areas of Concern");
+    body("These are possible areas your clinician will evaluate — not a diagnosis.", 0);
+    y += 1;
+    aiReport.possibleConditions.forEach((c) => {
+      checkPage(10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(31, 41, 55);
+      doc.text(`${c.name}`, MARGIN + 2, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(107, 114, 128);
+      doc.text(`${c.likelihood} likelihood`, PAGE_W - MARGIN - 30, y);
+      y += 4;
+      if (c.description) body(c.description, 4);
+      y += 1;
+    });
+    divider();
+  }
+
+  // ── Recommendations ───────────────────────────────────────────
+  if (aiReport?.recommendations && aiReport.recommendations.length > 0) {
+    heading2("Recommendations");
+    aiReport.recommendations.forEach((r, i) => bullet(`${i + 1}. ${r}`));
+    y += 2;
+    divider();
+  }
+
+  // ── Red flags ─────────────────────────────────────────────────
+  if (aiReport?.redFlags && aiReport.redFlags.length > 0) {
+    heading2("Red Flags — Seek Care Promptly");
+    aiReport.redFlags.forEach((f) => bullet(f, [220, 38, 38]));
+    y += 2;
+    divider();
+  }
+
+  // ── Follow-up ─────────────────────────────────────────────────
+  if (aiReport?.followUpTimeframe) {
+    heading2("Recommended Follow-up");
+    body(aiReport.followUpTimeframe);
+    y += 2;
+    divider();
+  }
+
+  // ── Disclaimer ────────────────────────────────────────────────
+  checkPage(16);
+  doc.setFillColor(239, 246, 255); // blue-50
+  doc.rect(MARGIN, y, LINE_W, 14, "F");
+  doc.setFont("helvetica", "bolditalic");
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 64, 175); // blue-800
+  const disclaimer = aiReport?.disclaimer ||
+    "This report was generated by an AI assistant to help your clinician understand your symptoms. It is NOT a medical diagnosis. Consult a healthcare professional for proper evaluation.";
+  const dLines = doc.splitTextToSize(disclaimer, LINE_W - 4);
+  dLines.forEach((line: string) => { doc.text(line, MARGIN + 2, y + 4); y += 4; });
+  y += 6;
+
+  // ── Page numbers ──────────────────────────────────────────────
+  const totalPages = (doc as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(156, 163, 175); // gray-400
+    doc.text(`ClinicAI Triage Report  •  Page ${p} of ${totalPages}`, MARGIN, 293);
+    doc.text("Confidential — For Clinical Use Only", PAGE_W - MARGIN, 293, { align: "right" });
+  }
+
+  const dateStamp = createdAt
+    ? format(new Date(createdAt), "yyyy-MM-dd")
+    : format(new Date(), "yyyy-MM-dd");
+  doc.save(`clinicai-report-${dateStamp}.pdf`);
 }
 
 export function ReportActions({ session }: ReportActionsProps) {
   const [modalOpen,    setModalOpen]    = useState(false);
   const [email,        setEmail]        = useState("");
   const [sending,      setSending]      = useState(false);
+  const [downloading,  setDownloading]  = useState(false);
   const [result,       setResult]       = useState<{ ok: boolean; message: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -41,8 +248,14 @@ export function ReportActions({ session }: ReportActionsProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [modalOpen]);
 
-  function handlePrint() {
-    window.print();
+  async function handleDownload() {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadPDF(session);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function handleSendEmail(e: React.FormEvent) {
@@ -84,15 +297,17 @@ export function ReportActions({ session }: ReportActionsProps) {
         <div className="flex gap-2 flex-shrink-0">
           <Button
             variant="outline"
-            onClick={handlePrint}
+            onClick={handleDownload}
+            isLoading={downloading}
             aria-label="Download report as PDF"
           >
-            {/* Download / PDF icon */}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-              className="mr-1.5 h-4 w-4" aria-hidden="true">
-              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-            Download PDF
+            {!downloading && (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                className="mr-1.5 h-4 w-4" aria-hidden="true">
+                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            )}
+            {downloading ? "Generating…" : "Download PDF"}
           </Button>
 
           <Button

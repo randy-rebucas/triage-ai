@@ -437,12 +437,16 @@ export async function* streamAnswer(
         chiefComplaint: cs.chiefComplaint,
         createdAt:      cs.createdAt,
         safetyFlags:    cs.safetyFlags,
+        qaFlow:         cs.qaFlow,
         aiReport:       cs.aiReport
           ? {
-              summary:           cs.aiReport.summary,
-              recommendations:   cs.aiReport.recommendations,
-              redFlags:          cs.aiReport.redFlags,
-              followUpTimeframe: cs.aiReport.followUpTimeframe,
+              summary:            cs.aiReport.summary,
+              possibleConditions: cs.aiReport.possibleConditions,
+              recommendations:    cs.aiReport.recommendations,
+              redFlags:           cs.aiReport.redFlags,
+              urgency:            cs.aiReport.urgency,
+              followUpTimeframe:  cs.aiReport.followUpTimeframe,
+              disclaimer:         cs.aiReport.disclaimer,
             }
           : undefined,
       },
@@ -489,12 +493,16 @@ export async function* streamAnswer(
               chiefComplaint: completedSession.chiefComplaint,
               createdAt:      completedSession.createdAt,
               safetyFlags:    completedSession.safetyFlags,
+              qaFlow:         completedSession.qaFlow,
               aiReport:       completedSession.aiReport
                 ? {
-                    summary:           completedSession.aiReport.summary,
-                    recommendations:   completedSession.aiReport.recommendations,
-                    redFlags:          completedSession.aiReport.redFlags,
-                    followUpTimeframe: completedSession.aiReport.followUpTimeframe,
+                    summary:            completedSession.aiReport.summary,
+                    possibleConditions: completedSession.aiReport.possibleConditions,
+                    recommendations:    completedSession.aiReport.recommendations,
+                    redFlags:           completedSession.aiReport.redFlags,
+                    urgency:            completedSession.aiReport.urgency,
+                    followUpTimeframe:  completedSession.aiReport.followUpTimeframe,
+                    disclaimer:         completedSession.aiReport.disclaimer,
                   }
                 : undefined,
             }
