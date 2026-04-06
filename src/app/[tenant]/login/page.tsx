@@ -250,113 +250,106 @@ export default function LoginPage() {
 
             {/* ─────────── Tab 2 — Phone OTP ─────────── */}
             {activeTab === "otp" && (
-              <>
-                {otpError && <Alert variant="error" className="mb-6">{otpError}</Alert>}
+              <div className="relative">
+                {/* Coming soon overlay */}
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl backdrop-blur-sm bg-white/60">
+                  <span className="text-2xl mb-1">📱</span>
+                  <p className="text-base font-semibold text-gray-700">Coming Soon</p>
+                  <p className="text-xs text-gray-500 mt-1">Phone OTP login is not yet available.</p>
+                </div>
 
-                {otpStep === "phone" ? (
-                  <form onSubmit={handleSendOtp} className="space-y-5">
-                    <Input
-                      label="Phone number"
-                      type="tel"
-                      placeholder="+63 917 123 4567"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      required
-                      autoComplete="tel"
-                    />
-                    <p className="text-xs text-gray-500">
-                      Enter the phone number registered with your clinic.
-                      A 6-digit code will be sent via SMS — valid for 5 minutes.
-                    </p>
-                    <Button type="submit" isLoading={otpLoading} className="w-full" size="lg">
-                      Send OTP
-                    </Button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyOtp} className="space-y-5">
-                    <p className="text-sm text-gray-600">
-                      A 6-digit code was sent to{" "}
-                      <span className="font-semibold text-gray-800">{phone}</span>.
-                      {" "}
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:underline text-sm"
-                        onClick={() => { setOtpStep("phone"); setOtpCode(""); setOtpError(null); }}
-                      >
-                        Wrong number?
-                      </button>
-                    </p>
+                {/* Blurred background content */}
+                <div className="pointer-events-none select-none">
+                  {otpError && <Alert variant="error" className="mb-6">{otpError}</Alert>}
 
-                    <Input
-                      label="OTP code"
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="000000"
-                      maxLength={6}
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                      required
-                      autoComplete="one-time-code"
-                    />
-
-                    <Button type="submit" isLoading={otpLoading} className="w-full" size="lg">
-                      Verify &amp; Sign In
-                    </Button>
-
-                    <p className="text-center text-sm">
-                      {countdown > 0 ? (
-                        <span className="text-gray-400">Resend in {countdown}s</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-blue-600 hover:underline"
-                          onClick={requestOtp}
-                          disabled={otpLoading}
-                        >
-                          Resend OTP
-                        </button>
-                      )}
-                    </p>
-                  </form>
-                )}
-              </>
+                  {otpStep === "phone" ? (
+                    <form className="space-y-5">
+                      <Input
+                        label="Phone number"
+                        type="tel"
+                        placeholder="+63 917 123 4567"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        autoComplete="tel"
+                      />
+                      <p className="text-xs text-gray-500">
+                        Enter the phone number registered with your clinic.
+                        A 6-digit code will be sent via SMS — valid for 5 minutes.
+                      </p>
+                      <Button type="button" className="w-full" size="lg">
+                        Send OTP
+                      </Button>
+                    </form>
+                  ) : (
+                    <form className="space-y-5">
+                      <p className="text-sm text-gray-600">
+                        A 6-digit code was sent to{" "}
+                        <span className="font-semibold text-gray-800">{phone}</span>.
+                      </p>
+                      <Input
+                        label="OTP code"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="000000"
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                        autoComplete="one-time-code"
+                      />
+                      <Button type="button" className="w-full" size="lg">
+                        Verify &amp; Sign In
+                      </Button>
+                    </form>
+                  )}
+                </div>
+              </div>
             )}
 
             {/* ─────────── Tab 3 — QR Code ─────────── */}
             {activeTab === "qr" && (
-              <>
-                {qrError && <Alert variant="error" className="mb-6">{qrError}</Alert>}
-                <form onSubmit={handleQrSubmit} className="space-y-5">
-                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm">
-                    <p className="font-medium text-blue-800 mb-2">How to use your QR card</p>
-                    <ol className="list-decimal list-inside space-y-1 text-blue-700">
-                      <li>Open your clinic-issued patient QR card</li>
-                      <li>Scan it with your phone&apos;s camera app</li>
-                      <li>Copy the code text that appears</li>
-                      <li>Paste it in the field below</li>
-                    </ol>
-                  </div>
+              <div className="relative">
+                {/* Coming soon overlay */}
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl backdrop-blur-sm bg-white/60">
+                  <span className="text-2xl mb-1">📷</span>
+                  <p className="text-base font-semibold text-gray-700">Coming Soon</p>
+                  <p className="text-xs text-gray-500 mt-1">QR Code login is not yet available.</p>
+                </div>
 
-                  <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-gray-700">
-                      QR code data
-                    </label>
-                    <textarea
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono leading-relaxed focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                      rows={4}
-                      placeholder={`{"type":"patient_login","patientId":"...","patientCode":"CLINIC-0001","tenantId":"..."}`}
-                      value={qrCode}
-                      onChange={(e) => setQrCode(e.target.value)}
-                      required
-                      spellCheck={false}
-                    />
-                  </div>
+                {/* Blurred background content */}
+                <div className="pointer-events-none select-none">
+                  {qrError && <Alert variant="error" className="mb-6">{qrError}</Alert>}
+                  <form className="space-y-5">
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm">
+                      <p className="font-medium text-blue-800 mb-2">How to use your QR card</p>
+                      <ol className="list-decimal list-inside space-y-1 text-blue-700">
+                        <li>Open your clinic-issued patient QR card</li>
+                        <li>Scan it with your phone&apos;s camera app</li>
+                        <li>Copy the code text that appears</li>
+                        <li>Paste it in the field below</li>
+                      </ol>
+                    </div>
 
-                  <Button type="submit" isLoading={qrLoading} className="w-full" size="lg">
-                    Sign in with QR
-                  </Button>
-                </form>
-              </>
+                    <div className="space-y-1.5">
+                      <label className="block text-sm font-medium text-gray-700">
+                        QR code data
+                      </label>
+                      <textarea
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono leading-relaxed resize-none"
+                        rows={4}
+                        placeholder={`{"type":"patient_login","patientId":"...","patientCode":"CLINIC-0001","tenantId":"..."}`}
+                        value={qrCode}
+                        onChange={(e) => setQrCode(e.target.value)}
+                        spellCheck={false}
+                        readOnly
+                      />
+                    </div>
+
+                    <Button type="button" className="w-full" size="lg">
+                      Sign in with QR
+                    </Button>
+                  </form>
+                </div>
+              </div>
             )}
 
           </div>
