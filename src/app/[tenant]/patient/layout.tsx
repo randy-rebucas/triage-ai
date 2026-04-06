@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { Navbar } from "@/components/layout/Navbar";
+import { Footer } from "@/components/layout/Footer";
 
 // ─────────────────────────────────────────────────────────────────
 // Patient Layout — /{tenant}/patient/*
@@ -28,11 +29,12 @@ export default async function PatientLayout({ children, params }: Props) {
   const displayName = email || patientCode || "Patient";
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar userName={displayName} tenantSlug={tenant} />
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
         {children}
       </main>
+      <Footer />
     </div>
   );
 }
