@@ -98,10 +98,23 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   ) {
     const hasCookie = req.cookies.get("patient_session");
     if (hasCookie) {
-      const origin = req.headers.get("origin");
-      if (origin) {
+      const origin  = req.headers.get("origin");
+      const referer = req.headers.get("referer");
+
+      // Require at least one of Origin or Referer for mutating requests
+      if (!origin && !referer) {
+        return json({ error: "CSRF validation failed" }, 403);
+      }
+
+      // Determine the effective origin to validate
+      let effectiveOrigin = origin;
+      if (!effectiveOrigin && referer) {
+        try { effectiveOrigin = new URL(referer).origin; } catch { /* ignore */ }
+      }
+
+      if (effectiveOrigin) {
         const host       = req.headers.get("host") || "";
-        const originHost = new URL(origin).hostname;
+        const originHost = new URL(effectiveOrigin).hostname;
         const isLocalhost  = originHost === "localhost" || originHost === "127.0.0.1";
         const isSameHost   = originHost === host.split(":")[0];
         const rootDomain   = process.env.ROOT_DOMAIN || "";
@@ -115,10 +128,30 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── 4. Pass-through for API and non-tenant paths ────────────────
+  // ── 4. Pass-through for API routes — derive tenant from Referer ──
+  // Client-supplied x-tenant-slug is untrusted. We instead extract
+  // the slug from the browser's Referer header (always set to the
+  // originating page URL by browsers) so the tenant context is
+  // anchored to the page the patient is actually viewing.
   if (pathname.startsWith("/api/") || !tenantSlug) {
-    const res = NextResponse.next();
-    if (tenantSlug) res.headers.set("x-tenant-slug", tenantSlug);
+    const requestHeaders = new Headers(req.headers);
+
+    if (pathname.startsWith("/api/")) {
+      // Always strip any client-forged value
+      requestHeaders.delete("x-tenant-slug");
+
+      const referer = req.headers.get("referer");
+      if (referer) {
+        try {
+          const slug = extractTenantFromPath(new URL(referer).pathname);
+          if (slug) requestHeaders.set("x-tenant-slug", slug);
+        } catch { /* ignore malformed referer */ }
+      }
+    } else if (tenantSlug) {
+      requestHeaders.set("x-tenant-slug", tenantSlug);
+    }
+
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
     return addSecurityHeaders(res);
   }
 

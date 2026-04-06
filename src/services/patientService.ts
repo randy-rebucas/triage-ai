@@ -74,11 +74,12 @@ export async function getAllPatients(
 
   let userIds: string[] | undefined;
   if (search) {
+    const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const users = await User.find({
       role: "patient",
       $or: [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+        { name: { $regex: escapedSearch, $options: "i" } },
+        { email: { $regex: escapedSearch, $options: "i" } },
       ],
     }).select("_id");
     userIds = users.map((u) => u._id.toString());

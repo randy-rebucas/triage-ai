@@ -36,13 +36,21 @@ async function handler(
       chiefComplaint:  session.chiefComplaint,
       status:          session.status,
       riskLevel:       session.riskLevel,
-      recommendations: session.recommendations,
+      riskScore:       session.riskScore,
+      recommendations: session.aiReport?.recommendations ?? [],
       safetyFlags:     session.safetyFlags,
-      doctorValidation: session.doctorValidation
+      aiReport:        session.aiReport
         ? {
-            doctorName:  session.doctorValidation.doctorName,
-            validatedAt: session.doctorValidation.validatedAt,
-            notes:       session.doctorValidation.notes,
+            summary:    session.aiReport.summary,
+            urgency:    session.aiReport.urgency,
+            disclaimer: session.aiReport.disclaimer,
+          }
+        : undefined,
+      clinicalReview: session.clinicalReview
+        ? {
+            reviewedBy:  session.clinicalReview.reviewedBy,
+            reviewedAt:  session.clinicalReview.reviewedAt,
+            notes:       session.clinicalReview.notes,
           }
         : undefined,
       disclaimer:

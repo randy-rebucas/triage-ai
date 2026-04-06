@@ -167,14 +167,14 @@ export interface IPatientWithUser extends IPatient {
 
 export interface IQaEntry {
   questionId: string;
-  question: string;
-  answer: string;
+  question:   string;
+  answer:     string;
   answeredAt: Date;
 }
 
 export interface IAiCondition {
-  name: string;
-  icd10Code: string;
+  name:       string;
+  icd10Code:  string;
   /** 0.0–1.0 AI confidence */
   confidence: number;
   likelihood: "low" | "moderate" | "high";
@@ -183,47 +183,76 @@ export interface IAiCondition {
 
 export interface IAiSummary {
   chiefComplaint: string;
-  duration?: string;
-  severity?: string;
-  onset?: string;
+  duration?:  string;
+  severity?:  string;
+  onset?:     string;
 }
 
 export interface IAiReport {
-  summary: IAiSummary;
+  summary:            IAiSummary;
   possibleConditions: IAiCondition[];
-  recommendations: string[];
-  urgency: RiskLevel;
-  disclaimer: string;
+  recommendations:    string[];
+  /** Critical observations for the reviewing doctor (not shown to patients) */
+  redFlags?:          string[];
+  urgency:            RiskLevel;
+  /** Recommended follow-up timeframe */
+  followUpTimeframe?: string;
+  disclaimer:         string;
 }
 
 export interface ISafetyFlag {
-  flag: string;
+  flag:     string;
   severity: "warning" | "urgent" | "emergency";
 }
 
 export interface IClinicalReview {
-  reviewedBy: string;
-  reviewedAt: Date;
-  notes?: string;
+  reviewedBy:  string;
+  reviewedAt:  Date;
+  notes?:      string;
   agreedWithAI: boolean;
 }
 
+// ─── Extracted symptoms (Stage 0 output) ─────────────────────────
+
+export interface IExtractedSymptom {
+  symptom:   string;
+  location?: string;
+  severity?: string;
+  duration?: string;
+}
+
+export interface IExtractedSymptoms {
+  symptoms:           IExtractedSymptom[];
+  primarySymptom:     string;
+  duration:           string | null;
+  severity:           string | null;
+  onset:              string | null;
+  bodySystem:         string;
+  redFlagLanguage:    string[];
+  coveredDimensions:  string[];
+  missingDimensions:  string[];
+}
+
+// ─── Full triage session ──────────────────────────────────────────
+
 export interface ITriageSession {
-  _id: string;
-  tenantId: string;
-  patientId: string;
-  chiefComplaint: string;
-  qaFlow: IQaEntry[];
+  _id:                  string;
+  tenantId:             string;
+  patientId:            string;
+  chiefComplaint:       string;
+  qaFlow:               IQaEntry[];
   currentQuestionIndex: number;
-  totalQuestions: number;
-  safetyFlags: ISafetyFlag[];
-  riskScore: number;
-  riskLevel: RiskLevel;
-  aiReport?: IAiReport;
-  status: TriageStatus;
-  clinicalReview?: IClinicalReview;
-  createdAt: Date;
-  updatedAt: Date;
+  totalQuestions:       number;
+  safetyFlags:          ISafetyFlag[];
+  riskScore:            number;
+  riskLevel:            RiskLevel;
+  /** Structured extraction from Stage 0 — persisted for downstream stages */
+  extractedSymptoms?:   IExtractedSymptoms;
+  aiReport?:            IAiReport;
+  status:               TriageStatus;
+  clinicalReview?:      IClinicalReview;
+  createdAt:            Date;
+  updatedAt:            Date;
 }
 
 // ─── AI Engine ───────────────────────────────────────────────────
@@ -237,21 +266,27 @@ export interface ITriageAnswerRequest {
 }
 
 export interface IAIQuestionResponse {
-  questionId: string;
-  question: string;
+  questionId:     string;
+  question:       string;
+  /** UI control hint from the AI — text | yes_no | slider */
+  inputType:      "text" | "yes_no" | "slider";
   isLastQuestion: boolean;
-  progress: number; // 0-100
+  progress:       number;
 }
 
 export interface IAIRiskAssessment {
-  riskScore: number;
-  riskLevel: RiskLevel;
-  safetyFlags: ISafetyFlag[];
+  riskScore:                number;
+  riskLevel:                RiskLevel;
+  safetyFlags:              ISafetyFlag[];
   requiresEmergencyReferral: boolean;
+  /** Brief clinical rationale for the assigned score */
+  reasoning?:               string;
+  /** Recommended timeframe for the patient to be seen */
+  recommendedTimeframe?:    string;
 }
 
 export interface IAIReportResponse {
-  aiReport: IAiReport;
+  aiReport:       IAiReport;
   riskAssessment: IAIRiskAssessment;
 }
 

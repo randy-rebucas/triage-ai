@@ -55,8 +55,12 @@ export function extractTokenFromCookie(
   if (!cookieHeader) return null;
   const cookies = cookieHeader.split(";").reduce(
     (acc, cookie) => {
-      const [key, value] = cookie.trim().split("=");
-      if (key && value) acc[key.trim()] = decodeURIComponent(value.trim());
+      const idx = cookie.indexOf("=");
+      if (idx > 0) {
+        const key   = cookie.slice(0, idx).trim();
+        const value = cookie.slice(idx + 1).trim();
+        if (key) acc[key] = decodeURIComponent(value);
+      }
       return acc;
     },
     {} as Record<string, string>

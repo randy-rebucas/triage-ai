@@ -9,6 +9,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
 } from "@/lib/api/response";
+import { rateLimit, applyRateLimitHeaders } from "@/lib/api/rate-limit";
 import type { IPatientJwtPayload } from "@/lib/auth/patientJwt";
 
 // ─────────────────────────────────────────────────────────────────
@@ -21,6 +22,18 @@ async function handler(
   patient: IPatientJwtPayload,
   context: PatientRouteContext
 ): Promise<Response> {
+  // Rate-limit: 60 answers per patient per minute
+  const rl = rateLimit(`triage:answer:${patient.patientId}`, 60, 60 * 1000);
+  if (!rl.allowed) {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    applyRateLimitHeaders(headers, rl);
+    headers.set("Retry-After", String(rl.retryAfter ?? 60));
+    return new Response(
+      JSON.stringify({ error: "Too many requests. Please slow down." }),
+      { status: 429, headers }
+    );
+  }
+
   try {
     const params    = await context.params;
     const sessionId = params?.sessionId;
@@ -36,13 +49,29 @@ async function handler(
     const tenantId = await getTenantId();
     const result   = await submitAnswer(sessionId, patient.patientId, parsed.data, tenantId);
 
-    if (result.isComplete) {
+    if (result.isComplete && result.session) {
+      const s = result.session;
       return successResponse(
         {
-          isComplete: true,
-          progress:   100,
-          session:    result.session,
-          message:    "Your symptom assessment is complete. A clinician will review your report shortly.",
+          isComplete:     true,
+          progress:       100,
+          message:        "Your symptom assessment is complete. A clinician will review your report shortly.",
+          session: {
+            _id:            s._id,
+            status:         s.status,
+            riskLevel:      s.riskLevel,
+            riskScore:      s.riskScore,
+            chiefComplaint: s.chiefComplaint,
+            safetyFlags:    s.safetyFlags,
+            aiReport: s.aiReport
+              ? {
+                  summary:            s.aiReport.summary,
+                  recommendations:    s.aiReport.recommendations,
+                  redFlags:           s.aiReport.redFlags,
+                  followUpTimeframe:  s.aiReport.followUpTimeframe,
+                }
+              : undefined,
+          },
         },
         "Triage assessment complete"
       );
@@ -52,6 +81,7 @@ async function handler(
       isComplete:     false,
       nextQuestion:   result.nextQuestion,
       nextQuestionId: result.nextQuestionId,
+      inputType:      result.inputType,
       progress:       result.progress,
     });
   } catch (err) {
@@ -65,7 +95,7 @@ async function handler(
     }
 
     console.error("[POST /api/triage/[sessionId]/answer]", err);
-    return serverErrorResponse(message);
+    return serverErrorResponse();
   }
 }
 

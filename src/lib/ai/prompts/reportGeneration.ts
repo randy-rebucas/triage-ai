@@ -1,97 +1,163 @@
 // ─────────────────────────────────────────────────────────────────
 // AI Prompt: Report Generation
-// Generates the structured triage report with possible conditions,
-// recommendations, and a structured summary object.
+//
+// Stage 3 (final) of the triage pipeline — runs after risk scoring.
+// Generates the complete structured pre-consultation report that is:
+//   • Shown to the reviewing doctor in full
+//   • Shown to the patient in a restricted view (no raw conditions)
+//
+// CRITICAL: This is NOT a diagnosis. All output must use hedging
+// language and include the mandatory medical disclaimer.
 // ─────────────────────────────────────────────────────────────────
+
+import type { SymptomExtractionResult } from "./symptomExtraction";
+
+// ─── Types ───────────────────────────────────────────────────────
 
 export interface ReportContext {
   chiefComplaint: string;
   answeredQuestions: {
     question: string;
-    answer: string;
+    answer:   string;
   }[];
-  riskScore: number;
-  riskLevel: string;
-  safetyFlags: {
-    flag: string;
-    severity: string;
-  }[];
-  patientAge?: number;
-  patientGender?: string;
-  medicalHistory?: string[];
-  allergies?: string[];
+  riskScore:   number;
+  riskLevel:   string;
+  safetyFlags: { flag: string; severity: string; }[];
+  patientAge?:        number;
+  patientGender?:     string;
+  medicalHistory?:    string[];
+  allergies?:         string[];
+  /** Structured extraction from Stage 0 */
+  extractedSymptoms?: SymptomExtractionResult;
+  /** Clinical reasoning from Stage 2 */
+  riskReasoning?:     string;
+}
+
+export interface PossibleCondition {
+  name:        string;
+  icd10Code:   string;
+  /** Decimal 0.0–1.0 AI confidence */
+  confidence:  number;
+  /** Categorical likelihood for patient-facing display */
+  likelihood:  "low" | "moderate" | "high";
+  /** Brief plain-language description for clinical reference */
+  description: string;
+}
+
+export interface ReportSummary {
+  /** Normalised, concise restatement of the chief complaint */
+  chiefComplaint: string;
+  /** Duration extracted from conversation ("2 hours", "3 days", "unknown") */
+  duration:       string;
+  /** Self-reported severity ("8/10", "moderate", "severe", "unknown") */
+  severity:       string;
+  /** Onset pattern ("sudden", "gradual", "unknown") */
+  onset:          string;
 }
 
 export interface ReportResult {
-  summary: {
-    chiefComplaint: string;
-    duration: string;
-    severity: string;
-    onset: string;
-  };
-  possibleConditions: {
-    name: string;
-    icd10Code: string;
-    /** 0.0–1.0 AI confidence */
-    confidence: number;
-    likelihood: "low" | "moderate" | "high";
-    description: string;
-  }[];
+  /** Structured symptom summary extracted from the conversation */
+  summary: ReportSummary;
+
+  /**
+   * 2–5 possible conditions in descending likelihood order.
+   * Must be labelled as "possible" — never "diagnosis".
+   */
+  possibleConditions: PossibleCondition[];
+
+  /** Conservative, actionable patient recommendations (most urgent first) */
   recommendations: string[];
+
+  /**
+   * Critical observations the reviewing doctor must pay attention to.
+   * Empty array when none present.
+   * These are DOCTOR-facing only — not shown to patients.
+   */
+  redFlags: string[];
+
+  /** Overall urgency level — must match the risk scoring output */
   urgency: "low" | "medium" | "high" | "critical";
+
+  /**
+   * Recommended follow-up timeframe.
+   * Examples: "within 48 hours", "routine appointment", "immediately"
+   */
+  followUpTimeframe: string;
+
+  /**
+   * Mandatory medical-legal disclaimer.
+   * Must be present in every report — auto-inserted by triageEngine if missing.
+   */
   disclaimer: string;
 }
 
+// ─── Prompt builders ─────────────────────────────────────────────
+
 export function buildReportSystemPrompt(): string {
-  return `You are an AI clinical triage assistant generating a pre-consultation report.
+  return `You are an AI clinical triage assistant generating a structured pre-consultation report for a licensed physician.
 
-CRITICAL MEDICAL-LEGAL RULES:
+━━━ ABSOLUTE MEDICAL-LEGAL RULES ━━━
 1. NEVER provide a definitive diagnosis — only "possible conditions"
-2. Always use hedging language: "may suggest", "could indicate", "possible", "warrants evaluation"
-3. Always include the medical disclaimer
-4. List ICD-10 codes accurately for clinician reference
-5. Recommendations must be safe and conservative
-6. If any emergency flags exist, make them the FIRST recommendation
+2. ALWAYS use hedging language: "may suggest", "could indicate", "possible", "warrants evaluation for"
+3. ALWAYS include the medical disclaimer (exact text provided below)
+4. ICD-10 codes must be valid and accurate
+5. Recommendations must be safe, conservative, and non-prescriptive
+6. If ANY emergency flags exist, they must be the VERY FIRST recommendation
+7. redFlags are doctor-facing only — clinical observations requiring attention
 
-SUMMARY OBJECT — extract from conversation:
-- chiefComplaint : normalised, concise restatement (1–2 sentences)
-- duration       : how long symptoms have been present ("2 hours", "3 days", "unknown")
-- severity       : self-reported severity ("8/10", "moderate", "mild", "unknown")
-- onset          : how symptoms started ("sudden", "gradual", "unknown")
+━━━ SUMMARY OBJECT ━━━
+Extract from the conversation — do not invent:
+  chiefComplaint → normalised restatement (1–2 sentences, patient's words paraphrased)
+  duration       → how long symptoms have been present ("2 hours", "3 days", "unknown")
+  severity       → self-reported intensity ("8/10", "moderate", "mild", "unknown")
+  onset          → how symptoms started ("sudden", "gradual", "unknown")
 
-POSSIBLE CONDITIONS FORMAT:
-- 2–5 conditions in order of likelihood
-- Correct ICD-10 codes
-- confidence: decimal 0.0–1.0 (e.g. 0.75)
-- likelihood: "low" | "moderate" | "high"
+━━━ POSSIBLE CONDITIONS ━━━
+  • 2–5 conditions, ordered by likelihood (highest first)
+  • Valid ICD-10 code for each
+  • confidence: decimal 0.0–1.0 (honest — avoid clustering around 0.5)
+  • likelihood: "low" | "moderate" | "high"
+  • description: 1 sentence clinical description using hedging language
 
-URGENCY maps to overall risk: "low" | "medium" | "high" | "critical"
+━━━ RECOMMENDATIONS (patient-facing) ━━━
+  • Plain language, actionable, conservative
+  • No specific medication names or dosages
+  • If HIGH or CRITICAL risk: first item must address urgency / 911 / ER
+  • Typically 3–6 items
 
-ALWAYS output valid JSON only.
+━━━ RED FLAGS (doctor-facing only) ━━━
+  • Critical clinical observations the doctor must review
+  • Include symptom patterns, comorbidity risks, or contradictions in answers
+  • Empty array [] if none identified
 
-OUTPUT FORMAT:
+━━━ DISCLAIMER (mandatory, exact text) ━━━
+"This AI-generated report is for clinical reference only and does not constitute a medical diagnosis. A licensed physician must review and validate all findings before any clinical decision is made."
+
+━━━ OUTPUT FORMAT (strict JSON) ━━━
 {
   "summary": {
-    "chiefComplaint": "Patient reports...",
-    "duration": "2 hours",
-    "severity": "8/10",
+    "chiefComplaint": "Patient reports ...",
+    "duration": "2 days",
+    "severity": "7/10",
     "onset": "sudden"
   },
   "possibleConditions": [
     {
       "name": "Condition name",
       "icd10Code": "X00.0",
-      "confidence": 0.75,
+      "confidence": 0.72,
       "likelihood": "high",
-      "description": "Brief clinical description"
+      "description": "Brief hedged clinical description"
     }
   ],
-  "recommendations": [
-    "Actionable recommendation 1"
-  ],
+  "recommendations": ["Most urgent item first", "..."],
+  "redFlags": ["Clinical observation requiring doctor attention"],
   "urgency": "high",
-  "disclaimer": "This AI-generated report is for clinical reference only and does not constitute a medical diagnosis. A licensed physician must review and validate all findings."
-}`;
+  "followUpTimeframe": "within 2–4 hours",
+  "disclaimer": "This AI-generated report is for clinical reference only and does not constitute a medical diagnosis. A licensed physician must review and validate all findings before any clinical decision is made."
+}
+
+ALWAYS output ONLY valid JSON.`;
 }
 
 export function buildReportUserPrompt(context: ReportContext): string {
@@ -105,6 +171,8 @@ export function buildReportUserPrompt(context: ReportContext): string {
     patientGender,
     medicalHistory,
     allergies,
+    extractedSymptoms,
+    riskReasoning,
   } = context;
 
   const conversationSummary = answeredQuestions
@@ -113,41 +181,59 @@ export function buildReportUserPrompt(context: ReportContext): string {
 
   const flagsText =
     safetyFlags.length > 0
-      ? safetyFlags.map((f) => `[${f.severity.toUpperCase()}] ${f.flag}`).join("\n")
-      : "No safety flags identified";
+      ? safetyFlags.map((f) => `  [${f.severity.toUpperCase()}] ${f.flag}`).join("\n")
+      : "  None identified";
 
-  return `Generate a clinical triage report based on the following data:
+  // Include extraction results when available to avoid re-inferring what we know
+  let extractionBlock = "";
+  if (extractedSymptoms) {
+    extractionBlock = `
+━━━ AUTOMATED EXTRACTION (Stage 0) ━━━
+  Primary symptom : ${extractedSymptoms.primarySymptom}
+  Body system     : ${extractedSymptoms.bodySystem}
+  Duration        : ${extractedSymptoms.duration ?? "not stated"}
+  Severity        : ${extractedSymptoms.severity ?? "not stated"}
+  Onset           : ${extractedSymptoms.onset ?? "not stated"}${
+    extractedSymptoms.redFlagLanguage.length > 0
+      ? `\n  Red-flag lang   : ${extractedSymptoms.redFlagLanguage.join(", ")}`
+      : ""
+  }
+`;
+  }
 
-PATIENT PROFILE:
-Age: ${patientAge || "Unknown"}
-Gender: ${patientGender || "Unknown"}
-Medical History: ${medicalHistory?.join(", ") || "None reported"}
-Known Allergies: ${allergies?.join(", ") || "None reported"}
+  const reasoningBlock = riskReasoning
+    ? `\nRisk Reasoning: ${riskReasoning}`
+    : "";
 
-CHIEF COMPLAINT:
+  return `Generate a complete clinical triage report from the following data.
+
+━━━ PATIENT PROFILE ━━━
+Age             : ${patientAge    ?? "Unknown"}
+Gender          : ${patientGender ?? "Unknown"}
+Medical History : ${medicalHistory?.join(", ") || "None reported"}
+Known Allergies : ${allergies?.join(", ")      || "None reported"}
+${extractionBlock}
+━━━ CHIEF COMPLAINT ━━━
 "${chiefComplaint}"
 
-SYMPTOM CONVERSATION:
+━━━ SYMPTOM CONVERSATION ━━━
 ${conversationSummary}
 
-AI RISK ASSESSMENT:
-Risk Score: ${riskScore}/100
-Risk Level: ${riskLevel.toUpperCase()}
+━━━ RISK ASSESSMENT (Stage 2) ━━━
+Score     : ${riskScore}/100
+Level     : ${riskLevel.toUpperCase()}${reasoningBlock}
 
-SAFETY FLAGS:
+━━━ SAFETY FLAGS ━━━
 ${flagsText}
 
-Generate a comprehensive triage report with:
-1. A structured summary object (chiefComplaint, duration, severity, onset — extracted from the conversation)
-2. 2–5 possible conditions with ICD-10 codes and 0.0–1.0 confidence scores
-3. Conservative patient recommendations (start with most urgent)
-4. Urgency level matching the risk level
-5. Standard medical disclaimer
-
-IMPORTANT:
-- If risk is HIGH or CRITICAL, the first recommendation must address urgency
-- Keep recommendations safe and non-specific regarding medication
-- confidence values must be numbers between 0.0 and 1.0
+Generate the report with:
+1. summary object (extract from conversation — use "unknown" if not stated)
+2. 2–5 possible conditions with ICD-10 codes and honest confidence scores
+3. Patient recommendations (most urgent first; address emergency if risk is HIGH/CRITICAL)
+4. redFlags array for doctor attention (empty array if none)
+5. urgency matching the risk level above
+6. followUpTimeframe consistent with the risk level
+7. Mandatory disclaimer (exact text from your instructions)
 
 Respond with ONLY valid JSON.`;
 }

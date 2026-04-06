@@ -38,9 +38,32 @@ export interface IAiReport {
   summary: IAiSummary;
   possibleConditions: IAiCondition[];
   recommendations: string[];
+  /** Critical observations for the reviewing doctor */
+  redFlags?: string[];
   /** Matches riskLevel — kept inside aiReport for the self-contained report view */
   urgency: RiskLevel;
+  /** Recommended follow-up timeframe */
+  followUpTimeframe?: string;
   disclaimer: string;
+}
+
+export interface IExtractedSymptomDocument {
+  symptom:   string;
+  location?: string;
+  severity?: string;
+  duration?: string;
+}
+
+export interface IExtractedSymptomsDocument {
+  symptoms:          IExtractedSymptomDocument[];
+  primarySymptom:    string;
+  duration:          string | null;
+  severity:          string | null;
+  onset:             string | null;
+  bodySystem:        string;
+  redFlagLanguage:   string[];
+  coveredDimensions: string[];
+  missingDimensions: string[];
 }
 
 export interface IClinicalReview {
@@ -51,8 +74,9 @@ export interface IClinicalReview {
 }
 
 export interface ITriageSessionDocument extends Document {
-  tenantId: Types.ObjectId;
+  tenantId:  Types.ObjectId;
   patientId: Types.ObjectId;
+  extractedSymptoms?: IExtractedSymptomsDocument;
 
   /** What the patient reported as the main concern */
   chiefComplaint: string;
@@ -139,31 +163,48 @@ const triageSessionSchema = new Schema<ITriageSessionDocument>(
       enum: ["low", "medium", "high", "critical"],
       default: "low",
     },
+    extractedSymptoms: {
+      symptoms: [
+        {
+          symptom:  { type: String },
+          location: { type: String },
+          severity: { type: String },
+          duration: { type: String },
+        },
+      ],
+      primarySymptom:    { type: String },
+      duration:          { type: String, default: null },
+      severity:          { type: String, default: null },
+      onset:             { type: String, default: null },
+      bodySystem:        { type: String },
+      redFlagLanguage:   { type: [String], default: [] },
+      coveredDimensions: { type: [String], default: [] },
+      missingDimensions: { type: [String], default: [] },
+    },
     aiReport: {
       summary: {
         chiefComplaint: { type: String },
-        duration: { type: String },
-        severity: { type: String },
-        onset: { type: String },
+        duration:       { type: String },
+        severity:       { type: String },
+        onset:          { type: String },
       },
       possibleConditions: [
         {
-          name: { type: String },
-          icd10Code: { type: String },
-          confidence: { type: Number, min: 0, max: 1 },
-          likelihood: {
-            type: String,
-            enum: ["low", "moderate", "high"],
-          },
+          name:        { type: String },
+          icd10Code:   { type: String },
+          confidence:  { type: Number, min: 0, max: 1 },
+          likelihood:  { type: String, enum: ["low", "moderate", "high"] },
           description: { type: String },
         },
       ],
-      recommendations: { type: [String], default: [] },
+      recommendations:   { type: [String], default: [] },
+      redFlags:          { type: [String], default: [] },
       urgency: {
         type: String,
         enum: ["low", "medium", "high", "critical"],
       },
-      disclaimer: { type: String },
+      followUpTimeframe: { type: String },
+      disclaimer:        { type: String },
     },
     status: {
       type: String,

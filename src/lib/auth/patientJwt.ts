@@ -16,7 +16,10 @@ const COOKIE_TTL  = 7  * 24 * 60 * 60;  // 7 days  (seconds)
 const BEARER_TTL  = 30 * 24 * 60 * 60;  // 30 days (seconds)
 
 if (!SECRET) {
-  console.warn("[patientJwt] SESSION_SECRET is not defined.");
+  throw new Error(
+    "[patientJwt] SESSION_SECRET (or JWT_SECRET) is not defined. " +
+    "Set SESSION_SECRET in your environment variables."
+  );
 }
 
 export interface IPatientJwtPayload {
