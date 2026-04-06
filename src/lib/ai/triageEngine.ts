@@ -4,6 +4,7 @@ import {
   parseAndValidate,
   SymptomExtractionResultSchema,
   NextQuestionResultSchema,
+  StreamingMetaSchema,
   RiskScoringResultSchema,
   ReportResultSchema,
 } from "./validation";
@@ -205,11 +206,22 @@ export async function* streamNextQuestion(
 
   let buffer       = "";
   let totalEmitted = 0;     // chars of buffer already sent as token events
-  let metaMode     = false; // true once the \n---\n delimiter has been consumed
-  const DELIMITER  = "\n---\n";
-  // Keep the last (DELIMITER.length - 1) chars un-emitted as a lookahead so a
-  // delimiter that straddles two chunks is never accidentally sent to the client.
-  const LOOKAHEAD = DELIMITER.length - 1;
+  let metaMode     = false; // true once the \n--- delimiter has been consumed
+
+  // The model is instructed to output:
+  //   <question text>
+  //   ---
+  //   {json metadata}
+  //
+  // In practice it may omit the newline *after* "---", outputting either:
+  //   \n---\n{...}  or  \n---{...}
+  //
+  // We therefore search for "\n---" (no trailing newline required) and strip
+  // any leading whitespace from whatever follows it.
+  const DELIMITER = "\n---";
+  // LOOKAHEAD: hold back enough chars that a delimiter split across two chunks
+  // is never prematurely emitted.  +2 accounts for the optional \n after "---".
+  const LOOKAHEAD = DELIMITER.length + 2;
 
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content ?? "";
@@ -219,16 +231,17 @@ export async function* streamNextQuestion(
     if (!metaMode) {
       const delimIdx = buffer.indexOf(DELIMITER);
       if (delimIdx !== -1) {
-        // Emit the un-sent question text that precedes the delimiter
+        // Emit any un-sent question text that precedes the delimiter
         if (delimIdx > totalEmitted) {
           yield { type: "token", text: buffer.slice(totalEmitted, delimIdx) };
         }
         metaMode     = true;
         totalEmitted = 0;
-        buffer       = buffer.slice(delimIdx + DELIMITER.length);
+        // Consume the delimiter and strip optional whitespace/newline before JSON
+        buffer = buffer.slice(delimIdx + DELIMITER.length).replace(/^[\s\r\n]*/, "");
       } else {
-        // Emit everything except the last LOOKAHEAD chars (they may be the
-        // start of the delimiter and must not be flushed yet).
+        // Emit everything except the LOOKAHEAD tail which may be the start
+        // of a delimiter split across two network chunks.
         const safeUpTo = Math.max(totalEmitted, buffer.length - LOOKAHEAD);
         if (safeUpTo > totalEmitted) {
           yield { type: "token", text: buffer.slice(totalEmitted, safeUpTo) };
@@ -239,27 +252,40 @@ export async function* streamNextQuestion(
     // metaMode: silently accumulate the JSON metadata
   }
 
-  // Stream ended — flush any remaining question text if the delimiter was
-  // never found (fallback: try to split on the first `\n{` boundary).
+  // Stream ended — flush remaining question text when delimiter was never seen.
+  // Priority order: \n--- boundary → \n{ boundary → emit all as text (last resort).
   if (!metaMode) {
-    const jsonStart = buffer.indexOf("\n{");
-    if (jsonStart !== -1 && jsonStart >= totalEmitted) {
-      yield { type: "token", text: buffer.slice(totalEmitted, jsonStart) };
-      buffer = buffer.slice(jsonStart + 1);   // leave only the JSON
-    } else {
-      if (buffer.length > totalEmitted) {
-        yield { type: "token", text: buffer.slice(totalEmitted) };
+    const sepIdx = buffer.indexOf("\n---");
+    if (sepIdx !== -1) {
+      // Found the separator without trailing newline variant
+      if (sepIdx > totalEmitted) {
+        yield { type: "token", text: buffer.slice(totalEmitted, sepIdx) };
       }
-      buffer = "";
+      buffer = buffer.slice(sepIdx + DELIMITER.length).replace(/^[\s\r\n]*/, "");
+    } else {
+      const jsonStart = buffer.indexOf("\n{");
+      if (jsonStart !== -1 && jsonStart >= totalEmitted) {
+        // Fallback: split on the first bare \n{ boundary
+        yield { type: "token", text: buffer.slice(totalEmitted, jsonStart) };
+        buffer = buffer.slice(jsonStart + 1); // leave only the JSON
+      } else {
+        // No metadata found at all — emit all remaining text and clear
+        if (buffer.length > totalEmitted) {
+          yield { type: "token", text: buffer.slice(totalEmitted) };
+        }
+        buffer = "";
+      }
     }
   }
 
-  // Parse the metadata JSON that accumulated after the delimiter
+  // Parse the metadata JSON that accumulated after the delimiter.
+  // Use StreamingMetaSchema (question is optional) because the question text
+  // was delivered as token events — it is not expected in this JSON block.
   const metaJson = buffer.trim();
   if (metaJson) {
     try {
       const parsed = parseAndValidate(
-        NextQuestionResultSchema,
+        StreamingMetaSchema,
         metaJson.startsWith("{") ? metaJson : `{${metaJson}}`,
         "streamNextQuestion:meta",
       );

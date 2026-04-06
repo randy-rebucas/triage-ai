@@ -452,7 +452,7 @@ export async function* streamAnswer(
 
   // Stream the next question token by token
   let lastMeta:        StreamingQuestionEvent["meta"] | undefined;
-  let streamedQuestion = "";   // accumulate tokens so we can persist the full text
+  let streamedQuestion = "";   // accumulate tokens for display (client already saw them)
 
   for await (const event of streamNextQuestion({
     chiefComplaint:    session.chiefComplaint,
@@ -501,12 +501,18 @@ export async function* streamAnswer(
           : undefined,
       };
     } else {
-      // Persist the question text that was streamed — never store an empty string
+      // Use the clean question text from the parsed JSON metadata as the
+      // authoritative source for DB storage.  The streamed tokens are for
+      // real-time display only and may be subtly different (whitespace, etc.).
+      // Strip any leaked delimiter/metadata from the token stream as a fallback.
+      const cleanStreamed = streamedQuestion.replace(/\n---[\s\S]*$/, "").trim();
+      const questionText  = lastMeta.question || cleanStreamed || lastMeta.questionId;
+
       await TriageSession.findByIdAndUpdate(sessionId, {
         $push: {
           qaFlow: {
             questionId: lastMeta.questionId,
-            question:   streamedQuestion.trim() || lastMeta.questionId,
+            question:   questionText,
             answer:     "",
             answeredAt: new Date(),
           },

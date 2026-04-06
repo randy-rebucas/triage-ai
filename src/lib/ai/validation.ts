@@ -46,6 +46,14 @@ export const NextQuestionResultSchema = z.object({
   progress:       z.number().min(0).max(100).default(0),
 });
 
+/**
+ * Streaming metadata variant — `question` is optional because the question
+ * text is delivered as token events rather than embedded in the JSON block.
+ */
+export const StreamingMetaSchema = NextQuestionResultSchema.extend({
+  question: z.string().default(""),
+});
+
 // ─── Stage 2 — Risk Scoring ───────────────────────────────────────
 
 export const SafetyFlagSchema = z.object({
